@@ -107,7 +107,7 @@ class SecClient:
 
     def get_filing_document(self, filing: FilingRef) -> FilingDocument:
         """Download a filing's primary HTML document, keeping the exact response bytes."""
-        url = _filing_document_url(filing)
+        url = filing_document_url(filing)
         response = self._get(url)
         _check_html_filing(response, url)
         return FilingDocument(
@@ -177,7 +177,7 @@ def _source_metadata(url: str, response: httpx.Response) -> SourceMetadata:
     )
 
 
-def _filing_document_url(filing: FilingRef) -> str:
+def filing_document_url(filing: FilingRef) -> str:
     """Return the filing's archive URL, or raise ValueError before any request is sent."""
     if filing.form not in DOCUMENT_FORMS:
         raise ValueError(

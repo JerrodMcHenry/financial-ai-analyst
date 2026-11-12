@@ -80,7 +80,7 @@ There is no HTTP endpoint for this in Phase B. The owner decided against a debug
 ```
 caller holds a FilingRef from get_submissions
   → SecClient.get_filing_document(filing)
-      1. _filing_document_url(filing)    → form must be 10-K/10-Q (or /A); primary document required;
+      1. filing_document_url(filing)     → form must be 10-K/10-Q (or /A); primary document required;
                                            URL must fully match https://www.sec.gov/Archives/edgar/data/
                                            <cik>/<18-digit accession>/<plain filename>.htm(l)
                                            (else ValueError, before any request)
@@ -147,6 +147,75 @@ FilingDocument.content (bytes)
 - Nested tables appear as text inside a cell.
 - Extremely deep, malformed nesting could exceed Python's recursion limit.
 
+### 3.2c Milestone 1.3: filing document cache (implemented)
+
+`filing_cache.py` stores raw `FilingDocument`s on the local filesystem. `SecClient` stays a pure HTTP client, and extracted content is **not** cached (D-020).
+
+```
+fetch_filing_document(sec, filing, cache_dir)
+  1. _entry_paths(filing)   → filing_document_url(filing) validates it first (same allowlist as
+                              downloads; ValueError before any filesystem access); path derived
+                              only from the validated CIK / accession / filename; resolved path
+                              must stay inside the cache root
+  2. load_filing_document   → read metadata JSON → schema_version, filing identity
+                              (CIK, accession, primary document, form) → read bytes →
+                              FilingDocument(...) whose validator re-checks SHA-256 and URL
+       hit                  ← verified document with ORIGINAL provenance; no SEC request
+       miss / invalid       → (invalid: warning logged)
+  3. sec.get_filing_document(filing)   (existing pacing, retries, validation)
+  4. save_filing_document   → bytes, then metadata, each via temp file + os.replace
+       OSError              → warning; the downloaded document is still returned
+```
+
+**Layout** mirrors EDGAR's archive under `FILING_CACHE_DIR` (default `data/sec-cache`, which git ignores):
+```
+filings/0000320193/000032019326000026/aapl-20260926.htm        exact bytes (after HTTP decompression)
+filings/0000320193/000032019326000026/aapl-20260926.htm.json   {"schema_version": 1, "filing": {...}, "source": {...}}
+```
+
+**Integrity.**
+- Every read rebuilds a `FilingDocument`, so the bytes are checked against the recorded SHA-256 by the same validator used for downloads.
+- The SHA-256 *verifies* the bytes. Filing *identity* comes from the key: CIK, accession number and primary document.
+
+**Provenance.**
+- The metadata stores the original `SourceMetadata`: URL, `retrieved_at`, HTTP status and SHA-256.
+- A cache hit returns that original record and the `FilingRef` stored with it. So `retrieved_at` always means when SEC served the bytes, not when the cache was read.
+- No response headers or User-Agent are stored.
+
+**Atomicity: per file, not per entry.**
+- Each file is replaced atomically. Readers never see a half-written file.
+- The bytes and metadata are **not** replaced as one transaction.
+- An interrupted write, or two processes writing the same filing at once, can leave bytes from one download next to metadata from another. Such a pair fails the hash check and is treated as a miss. It is never returned.
+- If SEC served identical bytes both times, the pair is consistent and valid.
+
+**Recovery.**
+- Any invalid entry is logged as a warning, treated as a miss, and overwritten after the next successful download. Invalid entries include:
+  - unreadable or garbled metadata;
+  - the wrong schema version;
+  - an identity mismatch;
+  - missing bytes;
+  - a hash mismatch.
+- Temporary files from failed writes are deleted where possible.
+- Deleting the cache directory is always safe, because everything in it can be downloaded again.
+
+**Security.**
+- Paths are built only from validated fields, never read from cached files.
+- The resolved path must stay inside the cache root, which rejects, for example, a symlink inside the cache that points elsewhere.
+- The cache directory **must be controlled by the application and not writable by untrusted users**. These checks keep paths inside the root, but cannot defend against someone who can rewrite the directory itself.
+
+**Limitations.**
+- No locking: concurrent misses download twice (bounded and rate-limited) and the last write wins.
+- No `fsync`: after a power loss an entry may be truncated, which the hash check catches.
+- No eviction or size limit.
+- Stale temporary files from hard crashes aren't swept.
+- Only primary filing documents are cached. Submissions and Company Facts change over time and would need an expiry policy.
+- The cache isn't shared across machines.
+
+**Path to PostgreSQL.**
+- The files remain the store for raw bytes.
+- A future `filing_documents` table would hold the metadata fields plus the storage path, filled by scanning the `.json` files.
+- Only the inside of `load` and `save` would change. `fetch_filing_document` and its callers would not.
+
 ### 3.3 Later milestone: ingestion
 
 ```
@@ -155,7 +224,7 @@ ticker → CIK (company_tickers.json)
   ├─▶ Company Facts (XBRL JSON) → normalize facts → facts table          [structured path]
   └─▶ primary document (HTML) → clean → split into Items (1A, 7, …)
         → chunk → embed → pgvector, each chunk carrying provenance       [narrative path]
-  raw responses cached on disk / in DB, keyed by URL and content hash
+  primary documents cached on disk (M1.3, §3.2c); mutable JSON caching (submissions, facts) later
 ```
 
 ### 3.4 Later milestone: research question
@@ -198,13 +267,15 @@ enterprise-financial-ai-analyst/
 │       ├── config.py           # Settings (pydantic-settings)
 │       ├── sec_client.py       # SecClient: submissions + filing documents (pacing, retries)
 │       ├── sec_models.py       # SourceMetadata, FilingRef, CompanySubmissions, FilingDocument
-│       └── filing_extractor.py # extract_filing: HTML → ordered blocks, sections, diagnostics
+│       ├── filing_extractor.py # extract_filing: HTML → ordered blocks, sections, diagnostics
+│       └── filing_cache.py     # filesystem cache for FilingDocuments (fetch / load / save)
 └── tests/
     ├── conftest.py             # shared settings fixture
     ├── fixtures/
     │   ├── submissions_sample.json   # trimmed EDGAR submissions payload
     │   └── filing_sample.htm         # trimmed inline-XBRL 10-K-style HTML
     ├── test_config.py
+    ├── test_filing_cache.py
     ├── test_filing_extractor.py
     ├── test_health.py
     └── test_sec_client.py
@@ -253,7 +324,7 @@ Behavior:
 | Errors | Three classes. `SecError` covers any failure and carries `status_code` (None for timeouts and connection errors). Two subclasses: `SecNotFoundError` (404) and `SecResponseError` (invalid JSON, schema mismatch, or a 200 response that is not plausibly a filing document). Callers never see raw `httpx` exceptions. |
 | Input validation | CIK must be 1–10 digits, then zero-padded to 10. Document requests must be a 10-K/10-Q-family filing whose URL fully matches the EDGAR archive pattern. Anything else raises `ValueError` before any network call. |
 | Redirects | Not followed (httpx default). A 3xx response raises `SecError`, so a request can never be steered to another host. |
-| Caching | Deferred to Milestone 1 (D-013). The `_get_json` seam is where a cache will be added. |
+| Caching | Not in `SecClient`. Primary filing documents are cached by `filing_cache.py` (§3.2c, D-020). Submissions are not cached yet. |
 
 **Why synchronous:** SEC access is rate-limited batch ingestion, so concurrency gains little under a global 4 req/s cap. Sync code is simpler to read, test and debug. If a FastAPI route ever calls it, a plain `def` route runs in FastAPI's threadpool, which the lock handles. Revisit only if profiling shows a need. (Decision D-004.)
 
@@ -384,7 +455,7 @@ Environment and lockfile management uses **`uv`** (already installed). It can in
 | # | Risk | Mitigation |
 |---|---|---|
 | R1 | ~~The project sat inside a git repo rooted at the home directory.~~ **Resolved** by the owner creating a dedicated project repository. | Phase B adds a `.gitignore` that excludes `.env`, virtual environments and caches. |
-| R2 | SEC blocks clients that exceed fair-access limits or omit a User-Agent. | Required and validated User-Agent, 4 req/s default, config cap at 10, backoff on 429/503, caching in M1. |
+| R2 | SEC blocks clients that exceed fair-access limits or omit a User-Agent. | Required and validated User-Agent, 4 req/s default, config cap at 10, backoff on 429/503, filing-document cache (M1.3). |
 | R3 | Fiscal period semantics. `fy`/`fp` in Company Facts belong to the filing, so a FY2023 10-K also reports FY2021–22 values tagged `fy=2023`. Non-calendar fiscal years (Apple ends in September). 52/53-week years. | Key facts by `(period_start, period_end)` and use `fy`/`fp` only as filing metadata. Store the company's `fiscal_year_end`. Never infer periods from `fy` alone. |
 | R4 | Restatements and duplicates: the same concept and period with different values across filings. | Keep every observation with its accession number. "Latest filed" is an explicit selection policy, and conflicting values are surfaced, never averaged or merged silently. |
 | R5 | Q4 and other derived values (Q4 = FY minus 9M YTD). | Derived only in `calc`, labeled `derived`, with input fact_ids attached. |

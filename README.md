@@ -69,6 +69,25 @@ The client paces requests (default 4/s, never more than SEC's 10/s), uses explic
 and retries 429/5xx/timeouts at most 3 times with exponential backoff (constants at the top
 of `sec_client.py`).
 
+## Caching filing documents
+
+```python
+from financial_analyst.filing_cache import fetch_filing_document
+
+settings = Settings()
+with SecClient(settings) as sec:
+    document = fetch_filing_document(sec, ten_k, settings.filing_cache_dir)  # SEC only on a miss
+```
+
+Primary filing documents are cached under `FILING_CACHE_DIR` (default `data/sec-cache`, git-ignored)
+as exact bytes plus a JSON metadata file. Every read re-verifies the SHA-256, and a cache hit
+returns the original provenance, including when SEC actually served the bytes. Corrupted or
+mismatched entries are treated as misses and replaced after the next download. If the cache
+can't be written, a warning is logged and the downloaded document is still returned. The cache
+directory must not be writable by untrusted users. Deleting it is always safe. Extracted
+content is not cached; extraction is fast and deterministic. Details:
+[docs/architecture.md](docs/architecture.md) §3.2c.
+
 ## Extracting filing content
 
 ```python

@@ -126,3 +126,18 @@ Status values: **Proposed** (awaiting owner approval), **Accepted**, **Supersede
 - `html5lib`: browser-exact, but slow.
 - Character offsets into the HTML: brittle, and misleading after tags are removed.
 - Using the table of contents to find sections: its links differ by filer, and it can disagree with the body.
+
+## D-020 Filesystem cache for raw filing documents
+**Status:** Accepted (owner approval, 2026-11-12)
+**Decision:** A new module, `filing_cache.py`, with three plain functions: `fetch_filing_document`, `load_filing_document` and `save_filing_document`. It caches primary filing documents under `FILING_CACHE_DIR` (default `data/sec-cache`) as exact bytes plus a JSON metadata file.
+- **Key:** CIK, accession number and primary document. The path is derived only after `filing_document_url` (now public) validates the filing, and the resolved path must stay inside the cache root.
+- **Reads:** every read rebuilds a `FilingDocument`, so the SHA-256 and URL are re-checked. A hit returns the original provenance.
+- **Writes:** bytes first, then metadata, each via temp file + `os.replace`. This is atomic per file, not per entry. Mismatched pairs from interrupted or concurrent writes fail the hash check and are treated as misses.
+- **Invalid entries:** logged and overwritten after the next download.
+- **Write failures:** non-fatal. They're logged, and the downloaded document is still returned.
+- **Not included:** locking, `fsync`, caching extracted content, and caching submissions.
+**Why:** Filings are immutable once filed, so a write-once file store is enough. It needs no dependencies, can be inspected with ordinary tools, and matches the long-term shape: raw bytes outside the database, metadata in Postgres later. The existing `FilingDocument` validator gives integrity checking without new code.
+**Alternatives:**
+- SQLite: atomic writes of bytes and metadata together, and queryable. Rejected: it would be a second database that Postgres later replaces, and the hash check already makes mismatched pairs safe.
+- PostgreSQL: premature to set up and run at this stage.
+- Content-addressed storage (files named by their hash): avoids mismatched pairs entirely, but adds indirection and garbage collection.
