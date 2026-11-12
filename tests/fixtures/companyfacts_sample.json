@@ -1,0 +1,95 @@
+{
+  "cik": 320193,
+  "entityName": "Apple Inc.",
+  "facts": {
+    "dei": {
+      "EntityCommonStockSharesOutstanding": {
+        "label": "Entity Common Stock, Shares Outstanding",
+        "description": "Indicate number of shares or other units outstanding of each of registrant's classes of capital or common stock.",
+        "units": {
+          "shares": [
+            {"end": "2026-10-17", "val": 14776353000, "accn": "0000320193-26-000026", "fy": 2026, "fp": "FY", "form": "10-K", "filed": "2026-11-03", "frame": "CY2026Q3I"}
+          ]
+        }
+      }
+    },
+    "us-gaap": {
+      "Revenues": {
+        "label": "Revenues",
+        "description": "Amount of revenue recognized from goods sold, services rendered, insurance premiums, or other activities.",
+        "units": {
+          "USD": [
+            {"start": "2023-10-01", "end": "2024-09-28", "val": 391035000000, "accn": "0000320193-24-000123", "fy": 2024, "fp": "FY", "form": "10-K", "filed": "2024-11-01"},
+            {"start": "2023-10-01", "end": "2024-09-28", "val": 391035000000, "accn": "0000320193-25-000079", "fy": 2025, "fp": "FY", "form": "10-K", "filed": "2025-10-31"},
+            {"start": "2023-10-01", "end": "2024-09-28", "val": 391040000000, "accn": "0000320193-26-000026", "fy": 2026, "fp": "FY", "form": "10-K", "filed": "2026-11-03", "frame": "CY2024"},
+            {"start": "2022-09-25", "end": "2023-09-30", "val": 383285000000, "accn": "0000320193-23-000106", "fy": 2023, "fp": "FY", "form": "10-K", "filed": "2023-11-03", "frame": "CY2023"},
+            {"start": "2022-09-25", "end": "2022-12-31", "val": 117154000000, "accn": "0000320193-23-000006", "fy": 2023, "fp": "Q1", "form": "10-Q", "filed": "2023-02-03", "frame": "CY2022Q4"},
+            {"start": "2023-01-01", "end": "2023-04-01", "val": 94836000000, "accn": "0000320193-23-000064", "fy": 2023, "fp": "Q2", "form": "10-Q", "filed": "2023-05-05", "frame": "CY2023Q1"},
+            {"start": "2022-09-25", "end": "2023-04-01", "val": 211990000000, "accn": "0000320193-23-000064", "fy": 2023, "fp": "Q2", "form": "10-Q", "filed": "2023-05-05"},
+            {"start": "2022-09-25", "end": "2023-07-01", "val": 293787000000, "accn": "0000320193-23-000077", "fy": 2023, "fp": "Q3", "form": "10-Q", "filed": "2023-08-04"},
+            {"start": "2026-06-28", "end": "2026-09-26", "val": 102466000000, "accn": "0000320193-26-000020", "fy": 2026, "fp": "Q4", "form": "8-K", "filed": "2026-10-30"},
+            {"start": "2024-09-29", "end": "2025-09-27", "val": "416161000000", "accn": "0000320193-25-000079", "fy": 2025, "fp": "FY", "form": "10-K", "filed": "2025-10-31"},
+            {"start": "2024-09-29", "end": "2025-09-27", "val": true, "accn": "0000320193-25-000079", "fy": 2025, "fp": "FY", "form": "10-K", "filed": "2025-10-31"},
+            {"start": "2024-09-29", "val": 416161000000, "accn": "0000320193-25-000079", "fy": 2025, "fp": "FY", "form": "10-K", "filed": "2025-10-31"},
+            {"start": "2025-09-27", "end": "2024-09-29", "val": 416161000000, "accn": "0000320193-25-000079", "fy": 2025, "fp": "FY", "form": "10-K", "filed": "2025-10-31"},
+            {"start": "2024-09-29", "end": "2025-09-27", "val": 416161000000, "accn": "bad-accession", "fy": 2025, "fp": "FY", "form": "10-K", "filed": "2025-10-31"}
+          ]
+        }
+      },
+      "EarningsPerShareDiluted": {
+        "label": "Earnings Per Share, Diluted",
+        "description": "The amount of net income or loss for the period per each share of common stock and dilutive common stock equivalents.",
+        "units": {
+          "USD/shares": [
+            {"start": "2023-10-01", "end": "2024-09-28", "val": 6.08, "accn": "0000320193-24-000123", "fy": 2024, "fp": "FY", "form": "10-K", "filed": "2024-11-01", "frame": "CY2024"}
+          ]
+        }
+      },
+      "Assets": {
+        "label": "Assets",
+        "description": "Sum of the carrying amounts as of the balance sheet date of all assets that are recognized.",
+        "units": {
+          "USD": [
+            {"end": "2024-09-28", "val": 364980000000, "accn": "0000320193-24-000123", "fy": 2024, "fp": "FY", "form": "10-K", "filed": "2024-11-01"},
+            {"end": "2023-09-30", "val": 352583000000, "accn": "0000320193-24-000123", "fy": 2024, "fp": "FY", "form": "10-K", "filed": "2024-11-01"},
+            {"end": "2024-09-28", "val": 365000000000, "accn": "0000320193-25-000010", "fy": 2024, "fp": "FY", "form": "10-K/A", "filed": "2025-01-15", "frame": "CY2024Q3I"}
+          ]
+        }
+      },
+      "IncomeTaxesPaidNet": {
+        "label": "Income Taxes Paid, Net",
+        "description": "Amount, after refund, of cash paid to foreign, federal, state, and local jurisdictions as income tax.",
+        "units": {
+          "USD": [
+            {"start": "2023-10-01", "end": "2024-09-28", "val": 26102000000, "accn": "0000320193-24-000123", "fy": 2024, "fp": "FY", "form": "10-K", "filed": "2024-11-01"},
+            {"start": "2023-10-01", "end": "2024-09-28", "val": 26100000000, "accn": "0000320193-24-000123", "fy": 2024, "fp": "FY", "form": "10-K", "filed": "2024-11-01"}
+          ]
+        }
+      },
+      "ResearchAndDevelopmentExpense": {
+        "label": "Research and Development Expense",
+        "description": null,
+        "units": {
+          "USD": [
+            {"start": "2023-10-01", "end": "2024-09-28", "val": 31370000000, "accn": "0000320193-25-000010", "fy": 2024, "fp": "FY", "form": "10-K/A", "filed": "2025-01-15"},
+            {"start": "2023-10-01", "end": "2024-09-28", "val": 31400000000, "accn": "0000320193-25-000011", "fy": 2024, "fp": "FY", "form": "10-K/A", "filed": "2025-01-15"},
+            {"start": "2022-09-25", "end": "2023-09-30", "val": 29915000000, "accn": "0000320193-24-000123", "fy": 2024, "fp": "FY", "form": "10-K", "filed": "2024-11-01"},
+            {"start": "2022-09-25", "end": "2023-09-30", "val": 29915000000, "accn": "0000320193-24-000124", "fy": 2024, "fp": "FY", "form": "10-K", "filed": "2024-11-01"}
+          ]
+        }
+      },
+      "DebtInstrumentFaceAmount": {
+        "label": "Debt Instrument, Face Amount",
+        "description": "Face (par) amount of debt instrument at time of issuance.",
+        "units": {
+          "USD": [
+            {"end": "2024-09-28", "val": 1000000000, "accn": "0000320193-24-000123", "fy": 2024, "fp": "FY", "form": "10-K", "filed": "2024-11-01"}
+          ],
+          "EUR": [
+            {"end": "2024-09-28", "val": 2000000000, "accn": "0000320193-24-000123", "fy": 2024, "fp": "FY", "form": "10-K", "filed": "2024-11-01"}
+          ]
+        }
+      }
+    }
+  }
+}

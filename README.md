@@ -103,3 +103,26 @@ Each block is a heading, paragraph or table, in document order. Tables keep thei
 `block.rows`. `dom_path` plus the document's SHA-256 says exactly where each block came from.
 Form 10-K sections are assigned only when their headings are unambiguous. See
 [docs/architecture.md](docs/architecture.md) §3.2b for the guarantees and limitations.
+
+## XBRL Company Facts
+
+```python
+from datetime import date
+from financial_analyst.company_facts import period_class, select_fact
+
+with SecClient(Settings()) as sec:
+    facts = sec.get_company_facts("320193")  # every fact SEC publishes; not cached
+
+result = select_fact(
+    facts, "us-gaap", "Revenues", "USD", date(2023, 10, 1), date(2024, 9, 28), policy="latest_filed"
+)
+print(result.selected, result.conflicting_values, result.reason)
+```
+
+Each SEC row becomes one `FactObservation`: an exact `Decimal` value with its unit, period,
+form, filing date and accession number. Rows are never merged. `select_fact` picks one
+observation for an exact period from 10-K/10-Q filings and their amendments, using an explicit
+`latest_filed` or `original` policy. It returns `None` with a reason instead of choosing
+arbitrarily between disagreeing values, and it never mixes units. SEC's `fy`/`fp` describe the
+*filing* and are stored as `filing_fiscal_year`/`filing_fiscal_period`. Details:
+[docs/architecture.md](docs/architecture.md) §3.2d.

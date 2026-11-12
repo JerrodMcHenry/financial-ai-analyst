@@ -2,6 +2,7 @@
 
 import hashlib
 from datetime import date, datetime
+from decimal import Decimal
 
 from pydantic import (
     AwareDatetime,
@@ -94,3 +95,74 @@ class FilingDocument(BaseModel):
         if hashlib.sha256(self.content).hexdigest() != self.source.content_sha256:
             raise ValueError("content does not match its SHA-256 hash")
         return self
+
+
+class FactConcept(BaseModel):
+    """SEC's label and description for one XBRL concept, stored once per concept."""
+
+    model_config = ConfigDict(frozen=True)
+
+    taxonomy: str  # "us-gaap", "dei", "srt", "ifrs-full", ...
+    concept: str  # "Revenues"
+    label: str | None
+    description: str | None
+
+
+class FactObservation(BaseModel):
+    """One Company Facts row exactly as SEC reported it. Never merged with other rows."""
+
+    model_config = ConfigDict(frozen=True)
+
+    cik: str = Field(pattern=r"^\d{10}$")
+    taxonomy: str
+    concept: str
+    unit: str  # exactly as SEC keys it: "USD", "EUR", "shares", "USD/shares", "pure", ...
+    value: Decimal  # exact; never a binary float
+    period_start: date | None  # None means an instant fact (e.g. a balance on period_end)
+    period_end: date
+    # SEC's "fy"/"fp" describe the FILING that reported this row, not the row's own period.
+    # A 10-K for fiscal 2026 reports fiscal 2024 comparatives with filing_fiscal_year=2026.
+    filing_fiscal_year: int | None
+    filing_fiscal_period: str | None
+    form: str = Field(min_length=1)
+    filed: date
+    accession_number: str = Field(pattern=r"^\d{10}-\d{2}-\d{6}$")
+    frame: str | None  # SEC's calendar-period tag; informational, not used for selection
+
+    @model_validator(mode="after")
+    def _check_period(self) -> "FactObservation":
+        if self.period_start is not None and self.period_start > self.period_end:
+            raise ValueError("period_start is after period_end")
+        return self
+
+    @computed_field
+    @property
+    def filing_index_url(self) -> str:
+        """EDGAR archive folder of the filing that reported this row."""
+        return f"{ARCHIVES_BASE_URL}/{int(self.cik)}/{self.accession_number.replace('-', '')}/"
+
+
+class SkippedObservation(BaseModel):
+    """Where a malformed Company Facts row was found and why it was not loaded."""
+
+    model_config = ConfigDict(frozen=True)
+
+    taxonomy: str
+    concept: str
+    unit: str
+    row_index: int  # position within SEC's list for that concept and unit
+    reason: str
+
+
+class CompanyFacts(BaseModel):
+    """All XBRL facts SEC publishes for one company, from data.sec.gov/api/xbrl/companyfacts."""
+
+    model_config = ConfigDict(frozen=True)
+
+    cik: str = Field(pattern=r"^\d{10}$")
+    entity_name: str
+    concepts: list[FactConcept]
+    observations: list[FactObservation]  # every valid row, in SEC's order
+    skipped_count: int  # total malformed rows not loaded
+    skipped_sample: list[SkippedObservation]  # the first few, for diagnosis
+    source: SourceMetadata

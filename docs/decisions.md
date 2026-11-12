@@ -141,3 +141,32 @@ Status values: **Proposed** (awaiting owner approval), **Accepted**, **Supersede
 - SQLite: atomic writes of bytes and metadata together, and queryable. Rejected: it would be a second database that Postgres later replaces, and the hash check already makes mismatched pairs safe.
 - PostgreSQL: premature to set up and run at this stage.
 - Content-addressed storage (files named by their hash): avoids mismatched pairs entirely, but adds indirection and garbage collection.
+
+## D-021 SEC Company Facts: exact values, every observation, explicit selection
+**Status:** Accepted (owner approval, 2026-11-12)
+**Decision:**
+- **Where the code lives:**
+  - `SecClient.get_company_facts` and `_parse_company_facts` in `sec_client.py`, reusing the existing transport;
+  - `FactConcept`, `FactObservation`, `SkippedObservation` and `CompanyFacts` in `sec_models.py`;
+  - one new module, `company_facts.py`, for `period_class`, `find_concept`, `find_observations` and `select_fact`.
+- **Exact numbers:** all SEC JSON is parsed with `parse_float=Decimal`. Booleans, strings, NaN and infinite values are rejected per row.
+- **Every row is kept** as one observation. Concept labels and descriptions are kept once per concept. SEC's `fy`/`fp` are renamed `filing_fiscal_year`/`filing_fiscal_period`.
+- **Validation:**
+  - an invalid overall structure is rejected;
+  - malformed rows are skipped, counted, and the first 20 sampled with taxonomy, concept, unit, row index and reason;
+  - a payload in which every row is malformed is rejected.
+- **Period classes** are lengths of time only (instant, 3, 6, 9 or 12 months, or other) with ranges that allow for 52/53-week years. They never identify fiscal periods.
+- **Selection:**
+  - candidates are every observation for the exact period, in a total order that doesn't depend on SEC's row order;
+  - only 10-K, 10-K/A, 10-Q and 10-Q/A are eligible;
+  - the policy is `latest_filed` or `original`;
+  - disagreeing values on the chosen filing date, whether in one filing or several, give `None` with a reason;
+  - conflicts are flagged;
+  - the unit must always be named.
+- **Not cached** in M1.4.
+**Why:** financial values must be exact and traceable. Keeping every row preserves revisions and amendments as evidence instead of hiding them. Selecting explicitly, and refusing to break ties arbitrarily, prevents silently picking the wrong number. Treating `fy`/`fp` as filing attributes avoids the most common Company Facts misuse.
+**Alternatives:**
+- Deduplicating at parse time: rejected, because it loses the evidence of revisions.
+- Using SEC's `frame` for selection: rejected, because frames are calendar-aligned and SEC's choice, not ours.
+- Rejecting the whole response for one bad row: rejected, because it's too fragile for a payload with thousands of rows.
+- Caching: deferred, because the data changes over time. Storage per accession number, whose facts don't change, belongs with the database milestone.

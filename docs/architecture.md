@@ -216,6 +216,78 @@ filings/0000320193/000032019326000026/aapl-20260926.htm.json   {"schema_version"
 - A future `filing_documents` table would hold the metadata fields plus the storage path, filled by scanning the `.json` files.
 - Only the inside of `load` and `save` would change. `fetch_filing_document` and its callers would not.
 
+### 3.2d Milestone 1.4: XBRL Company Facts (implemented)
+
+```
+SecClient.get_company_facts(cik)                                  (sec_client.py)
+  → GET https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json   (existing pacing/retries)
+  → json.loads(..., parse_float=Decimal)       numbers stay exact; floats never enter values
+  → _parse_company_facts
+       structure (cik matches, entityName, facts → taxonomy → concept → units → [rows]) must be
+       valid, else SecResponseError
+       each row → FactObservation; malformed rows skipped, counted, first 20 sampled
+       every supplied row malformed → SecResponseError (never "company has no facts")
+  ← CompanyFacts(cik, entity_name, concepts[label, description], observations,
+                 skipped_count, skipped_sample, source)
+
+company_facts.select_fact(facts, taxonomy, concept, unit, period_start, period_end, policy)
+  ← FactSelection(selected | None, candidates, conflicting_values, reason, source)
+```
+
+**What is kept.**
+- Every row SEC lists becomes one `FactObservation`, never deduplicated or merged. Each keeps:
+  - `cik`, `taxonomy`, `concept` and `unit`, exactly as SEC gives them;
+  - `value` as a `Decimal`;
+  - `period_start` (`None` for an instant fact) and `period_end`;
+  - `form`, `filed`, `accession_number` and `frame`;
+  - SEC's `fy`/`fp`, renamed **`filing_fiscal_year`/`filing_fiscal_period`** because they describe the *filing*, not the row's own period.
+- Concept labels and descriptions are kept once per concept in `CompanyFacts.concepts`, not copied into every row.
+- The raw JSON is not kept. `source` records its URL, retrieval time and SHA-256.
+
+**Provenance.**
+- Each observation identifies its originating filing (`accession_number`, `form`, `filed`, and the computed `filing_index_url`).
+- `CompanyFacts.source`, which is repeated on each `FactSelection`, identifies the exact Company Facts response.
+- No page numbers or document locations are claimed. Company Facts doesn't say where in the filing a fact appears.
+
+**Period classification** (`period_class`).
+- No `period_start` means `instant`.
+- Otherwise the inclusive length in days decides the class:
+
+  | Class | Days |
+  |---|---|
+  | `3_months` | 84–98 |
+  | `6_months` | 175–189 |
+  | `9_months` | 266–280 |
+  | `12_months` | 357–371 |
+  | `other` | anything else |
+
+- The ranges allow for 52/53-week years and 14-week quarters.
+- These classes describe **lengths of time only**. They do not identify fiscal quarters or years, and `fy`/`fp` are never used for that.
+
+**Selection** (`select_fact`).
+- **Candidates:** every observation with exactly the requested taxonomy, concept, unit, start and end, in any form, sorted by a total order (filing date, accession number, then every other field). The result therefore doesn't depend on SEC's row order.
+- **Eligible:** only `10-K`, `10-K/A`, `10-Q` and `10-Q/A`.
+- **Policy:** `latest_filed` (the default, which reflects revisions and amendments) or `original` (as first reported) picks a filing date.
+- **Ties:** if the eligible observations filed on that date disagree, whether in one filing or several, `selected` is `None` and `reason` says why. Equally eligible values are never chosen between arbitrarily.
+- **Agreement:** if they agree, the first in sort order is chosen deterministically.
+- **`conflicting_values`** is true whenever the candidates report different values, for example a later comparative that revises the original.
+- **`None` with a reason** is also returned when:
+  - the concept was never reported;
+  - the period isn't reported;
+  - the period is only in ineligible forms.
+
+  It is never zero, and never a nearby period.
+- **Units must always be named.** Different units and currencies are never combined or converted.
+
+**Limitations.**
+- **Not cached:** Company Facts changes with every filing.
+- **No concept mapping:** "revenue" might be any of several concepts, and series must not be joined across concept changes.
+- **No fiscal-calendar inference and no Q4 derivation.**
+- **Restatements and reclassifications** can't be told apart from this data.
+- **No segment-level facts:** Company Facts excludes dimensional data.
+- **Labels and descriptions** are SEC's taxonomy text, not company-specific.
+- **Large responses** are fully loaded into memory.
+
 ### 3.3 Later milestone: ingestion
 
 ```
@@ -268,12 +340,15 @@ enterprise-financial-ai-analyst/
 │       ├── sec_client.py       # SecClient: submissions + filing documents (pacing, retries)
 │       ├── sec_models.py       # SourceMetadata, FilingRef, CompanySubmissions, FilingDocument
 │       ├── filing_extractor.py # extract_filing: HTML → ordered blocks, sections, diagnostics
-│       └── filing_cache.py     # filesystem cache for FilingDocuments (fetch / load / save)
+│       ├── filing_cache.py     # filesystem cache for FilingDocuments (fetch / load / save)
+│       └── company_facts.py    # XBRL fact period classification and observation selection
 └── tests/
     ├── conftest.py             # shared settings fixture
     ├── fixtures/
     │   ├── submissions_sample.json   # trimmed EDGAR submissions payload
+    │   ├── companyfacts_sample.json  # hand-written Company Facts payload (illustrative values)
     │   └── filing_sample.htm         # trimmed inline-XBRL 10-K-style HTML
+    ├── test_company_facts.py
     ├── test_config.py
     ├── test_filing_cache.py
     ├── test_filing_extractor.py
@@ -371,9 +446,12 @@ EDGAR returns `filings.recent` as parallel arrays (one array per field). The par
 
 A model validator enforces two invariants: `sha256(content) == source.content_sha256`, and `source.source_url == filing.primary_document_url`.
 
-### Level 2: structured fact (`FactRecord`, Milestone 1, design only)
+### Level 2: structured fact (`FactObservation`, Milestone 1.4)
 
-`fact_id`, `cik`, `taxonomy` (`us-gaap`/`dei`/`ifrs-full`), `concept`, `unit` (`USD`, `shares`, `USD/shares`, `pure`), `value: Decimal`, `period_start: date | None` (None means an instant fact), `period_end: date`, `fy`, `fp`, `form`, `filed`, `accession_number`, `frame | None`, `source_url`.
+`cik`, `taxonomy`, `concept`, `unit`, `value: Decimal`, `period_start: date | None` (None means an instant fact), `period_end`, `filing_fiscal_year`, `filing_fiscal_period` (SEC's `fy`/`fp`, which describe the filing), `form`, `filed`, `accession_number`, `frame | None`, and the computed `filing_index_url`.
+- The retrieval provenance is `CompanyFacts.source`, repeated on each `FactSelection`.
+- Labels and descriptions live once per concept in `FactConcept`.
+- A deterministic `fact_id` for citations will be derived from `(cik, taxonomy, concept, unit, period_start, period_end, accession_number)` when tool calling arrives. That key can still be ambiguous, because one filing can report conflicting values (§3.2d).
 
 ### Extracted content (`ExtractedFiling`, `ContentBlock`, Milestone 1.2)
 

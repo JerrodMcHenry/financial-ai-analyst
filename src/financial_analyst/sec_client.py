@@ -5,12 +5,14 @@ request pacing, explicit timeouts, and bounded retries with backoff.
 """
 
 import hashlib
+import json
 import logging
 import random
 import re
 import threading
 import time
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -18,15 +20,21 @@ from pydantic import ValidationError
 
 from financial_analyst.config import Settings
 from financial_analyst.sec_models import (
+    CompanyFacts,
     CompanySubmissions,
+    FactConcept,
+    FactObservation,
     FilingDocument,
     FilingRef,
+    SkippedObservation,
     SourceMetadata,
 )
 
 logger = logging.getLogger(__name__)
 
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
+COMPANY_FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+MAX_SKIPPED_SAMPLE = 20
 
 CONNECT_TIMEOUT_SECONDS = 5.0
 READ_TIMEOUT_SECONDS = 20.0
@@ -114,10 +122,17 @@ class SecClient:
             filing=filing, content=response.content, source=_source_metadata(url, response)
         )
 
+    def get_company_facts(self, cik: str | int) -> CompanyFacts:
+        """Fetch every XBRL fact SEC publishes for a company. Not cached: it changes over time."""
+        cik = normalize_cik(cik)
+        payload, source = self._get_json(COMPANY_FACTS_URL.format(cik=cik))
+        return _parse_company_facts(payload, cik, source)
+
     def _get_json(self, url: str) -> tuple[dict[str, Any], SourceMetadata]:
         response = self._get(url)
         try:
-            payload = response.json()
+            # parse_float=Decimal keeps reported numbers exact; floats never enter values.
+            payload = json.loads(response.content, parse_float=Decimal)
         except ValueError as exc:
             raise SecResponseError(f"Invalid JSON from {url}") from exc
         if not isinstance(payload, dict):
@@ -284,3 +299,105 @@ def _parse_submissions(
         )
     except (KeyError, TypeError, ValueError, ValidationError) as exc:
         raise SecResponseError(f"Malformed submissions response for CIK {cik}: {exc}") from exc
+
+
+def _parse_company_facts(payload: dict[str, Any], cik: str, source: SourceMetadata) -> CompanyFacts:
+    """Convert facts[taxonomy][concept]["units"][unit] = [rows] into typed records.
+
+    The overall structure must be valid or the whole response is rejected. Individual
+    malformed rows are skipped and counted; if every supplied row is malformed, the
+    response is rejected rather than returned as if the company had no facts.
+    """
+    try:
+        if normalize_cik(payload["cik"]) != cik:
+            raise SecResponseError(
+                f"Response CIK {payload['cik']!r} does not match requested {cik}"
+            )
+        entity_name = payload["entityName"]
+        facts = payload["facts"]
+        if not isinstance(entity_name, str) or not isinstance(facts, dict):
+            raise SecResponseError("Company Facts response has no entity name or facts object")
+
+        concepts: list[FactConcept] = []
+        observations: list[FactObservation] = []
+        skipped: list[SkippedObservation] = []
+        skipped_count = 0
+        for taxonomy, taxonomy_facts in facts.items():
+            for concept, details in taxonomy_facts.items():
+                concepts.append(
+                    FactConcept(
+                        taxonomy=taxonomy,
+                        concept=concept,
+                        label=details.get("label"),
+                        description=details.get("description"),
+                    )
+                )
+                for unit, rows in details["units"].items():
+                    if not isinstance(rows, list):
+                        raise SecResponseError(f"Rows for {taxonomy}:{concept} [{unit}] not a list")
+                    for row_index, row in enumerate(rows):
+                        try:
+                            observations.append(_parse_fact_row(cik, taxonomy, concept, unit, row))
+                        except (KeyError, TypeError, ValueError) as exc:
+                            skipped_count += 1
+                            if len(skipped) < MAX_SKIPPED_SAMPLE:
+                                skipped.append(
+                                    SkippedObservation(
+                                        taxonomy=taxonomy,
+                                        concept=concept,
+                                        unit=unit,
+                                        row_index=row_index,
+                                        reason=_row_error_reason(exc),
+                                    )
+                                )
+    except (KeyError, TypeError, AttributeError, ValueError) as exc:
+        raise SecResponseError(f"Malformed Company Facts response for CIK {cik}: {exc}") from exc
+
+    if skipped_count and not observations:
+        raise SecResponseError(
+            f"All {skipped_count} Company Facts rows for CIK {cik} are malformed"
+        )
+    return CompanyFacts(
+        cik=cik,
+        entity_name=entity_name,
+        concepts=concepts,
+        observations=observations,
+        skipped_count=skipped_count,
+        skipped_sample=skipped,
+        source=source,
+    )
+
+
+def _parse_fact_row(cik: str, taxonomy: str, concept: str, unit: str, row: Any) -> FactObservation:
+    if not isinstance(row, dict):
+        raise TypeError("row is not a JSON object")
+    value = row["val"]
+    # bool is a subclass of int in Python, and NaN/Infinity arrive as floats; reject both.
+    is_integer = isinstance(value, int) and not isinstance(value, bool)
+    if not (is_integer or (isinstance(value, Decimal) and value.is_finite())):
+        raise ValueError(f"value is not a finite number: {value!r}")
+    return FactObservation(
+        cik=cik,
+        taxonomy=taxonomy,
+        concept=concept,
+        unit=unit,
+        value=Decimal(value),
+        period_start=row.get("start"),
+        period_end=row["end"],
+        filing_fiscal_year=row.get("fy"),
+        filing_fiscal_period=row.get("fp"),
+        form=row["form"],
+        filed=row["filed"],
+        accession_number=row["accn"],
+        frame=row.get("frame"),
+    )
+
+
+def _row_error_reason(exc: Exception) -> str:
+    if isinstance(exc, KeyError):
+        return f"missing field {exc.args[0]!r}"
+    if isinstance(exc, ValidationError):
+        error = exc.errors()[0]
+        location = ".".join(str(part) for part in error["loc"])
+        return f"{location}: {error['msg']}" if location else error["msg"]
+    return str(exc)
