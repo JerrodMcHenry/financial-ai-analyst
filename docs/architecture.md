@@ -118,7 +118,7 @@ FilingDocument.content (bytes)
 ```
 
 **Extractor version.**
-- `EXTRACTOR_VERSION` (currently `"1"`) is recorded on every `ExtractedFiling`.
+- `EXTRACTOR_VERSION` (currently `"2"`; `"1"` gave 10-Qs no sections) is recorded on every `ExtractedFiling`.
 - Bump it whenever a change could alter block text, kinds, order, indexes or locations for the same input bytes. A `beautifulsoup4` upgrade can do this too.
 - A block is identified only by **source SHA-256 + extractor version + block index**. Any stored chunk or citation identifier must include all three (D-022).
 
@@ -134,12 +134,40 @@ FilingDocument.content (bytes)
   - that a heading/paragraph classification matches the author's intent;
   - that every section boundary is found.
 
-**Section detection** applies to **10-K and 10-K/A only** (D-022). For any other form, including 10-Q and 10-Q/A:
+**Section detection** has separate rules for **10-K/10-K/A** (labels such as `"Item 1A"`) and **10-Q/10-Q/A** (labels such as `"Part I, Item 2"`; D-023).
+
+For any other form:
 - every block is still extracted with the same text, order and locations;
 - `section` is `None` for every block;
-- found, missing and uncertain sections are all empty, and a warning says detection isn't supported for that form.
+- found, missing and uncertain sections are all empty, and a warning says detection isn't supported.
 
-A 10-Q repeats Items 1–4 in Part I and Part II with different meanings (Part I Item 2 is MD&A), so 10-K numbering would mislabel or misreport it. **Section detection that understands 10-Q Parts I and II is required in M2** before 10-Q narrative is retrieved by section.
+The form changes only `section` and the section diagnostics. Block text, order, tables, `dom_path` and `element_id` are identical whichever rules apply.
+
+**10-Q rules** (`_assign_10q_sections`). A 10-Q numbers items separately in Part I (Financial Information: Items 1–4) and Part II (Other Information: Items 1, 1A, 2–6), so Item 2 means MD&A in Part I and repurchases in Part II.
+- **Boundaries** are heading blocks that *start with* "Part I"/"Part II" or "Item N". Tables of contents built as `<table>` and Part or Item references inside paragraphs are ignored.
+- **Each Item takes the Part of the nearest trusted Part heading above it.** Part headings are **never inferred**: an Item with no Part heading above it is reported as `"Item N (Part unknown)"` in `uncertain_sections` and left unassigned.
+- **Parts must run I, then II.** Repeating the current Part is harmless. Going back to Part I, or any other Part number, means the Part structure can't be trusted: **nothing in the document is labeled**, including items seen before the break. Without that rule, a table of contents written as bold headings would take the labels away from the real sections.
+- **An item is labeled only if** it's valid for its Part (Item 1A only in Part II), occurs once in that Part, and comes in order. Otherwise it's unassigned, listed as uncertain and warned about. The same number in the other Part isn't a duplicate.
+- **Priority 10-Q sections** are `Part I, Item 1` (financial statements), `Part I, Item 2` (MD&A) and `Part II, Item 1A` (risk factors). One is reported missing only when no heading for it exists at all. An `"Item N (Part unknown)"` heading makes it uncertain, not missing.
+
+**Live verification (M2.1, 2026-11-12, extractor v2).**
+
+| Filing | Blocks | Labeled | Result |
+|---|---|---|---|
+| Apple 10-Q, accession `0000320193-26-000020`, report date 2026-06-27 | 304 | 269 | All 11 items detected (Part I Items 1–4; Part II Items 1, 1A, 2–6). No warnings and no incorrect section assignments. MD&A (`Part I, Item 2`) has 89 blocks. |
+| JPMorgan Chase 10-Q, accession `0001628280-26-069523`, report date 2026-09-30 | 2,509 | 0 | No sections detected and no incorrect section assignments. |
+
+**Why JPMorgan got no labels.**
+- Its Item lines (for example "Item 1A. Risk Factors.") are plain text, not bold. They're classified as paragraphs and aren't boundaries.
+- Its Part I content is organized under topic headings and reached through a cross-reference index table. There are no explicit Item 1/Item 2 headings in the body.
+- The extractor conservatively left all content unassigned.
+
+**So the 10-Q rules are safe on both filers, but effective only when items are explicit bold headings under Part headings.**
+
+**Design constraint for M2.2 (passages) and M2.3 (retrieval).** Retrieval must work when section labels are unavailable:
+- A missing section (`section=None`) must not prevent passage construction, indexing, searching or citation verification.
+- An explicit section filter must keep its meaning. Filtering on `"Part I, Item 2"` returns only passages labeled with that section, and returns none for an unlabeled filing. It must never silently fall back to unrelated passages.
+- Searching without a section filter, for example by accession and form, must work for every filing.
 
 For 10-Ks, only heading blocks whose text *starts with* "Item N" (a valid Form 10-K item) or "Part I–IV" are boundaries.
 - A table of contents built as a `<table>` is ignored, and cross-references inside sentences are paragraphs, so they are ignored too.
@@ -151,7 +179,8 @@ For 10-Ks, only heading blocks whose text *starts with* "Item N" (a valid Form 1
 **Diagnostics** (`ExtractionDiagnostics`) report the encoding, the block, paragraph, heading and table counts, sections found, missing and uncertain, and warnings. They describe what the extractor did. They do not show that the extraction is semantically correct.
 
 **Known limitations.**
-- 10-Q and 10-Q/A filings get no section labels yet (see Section detection).
+- **10-Q:** a heading that combines Part and Item (for example "PART II — Item 1A. Risk Factors") is treated as a Part heading only, so that item is missed. A table of contents written as bold headings that repeat Part headings makes the whole document unlabeled (safe, but no sections).
+- **10-Q:** verified live on two filings (see Live verification above). Apple: all items labeled. JPMorgan: nothing labeled, because its Item lines are plain text and Part I uses topic headings with a cross-reference index. Improved detection for such filings is not implemented.
 - Headings that aren't bold or `<h1>`–`<h6>` become paragraphs, so their section is reported missing.
 - Combined headings ("Items 1 and 2.") aren't recognized.
 - Page headers, footers and page numbers remain as paragraphs.
@@ -360,7 +389,8 @@ enterprise-financial-ai-analyst/
     ├── fixtures/
     │   ├── submissions_sample.json   # trimmed EDGAR submissions payload
     │   ├── companyfacts_sample.json  # hand-written Company Facts payload (illustrative values)
-    │   └── filing_sample.htm         # trimmed inline-XBRL 10-K-style HTML
+    │   ├── filing_sample.htm         # trimmed inline-XBRL 10-K-style HTML
+    │   └── filing_10q_sample.htm     # trimmed inline-XBRL 10-Q-style HTML (Parts I/II)
     ├── test_company_facts.py
     ├── test_config.py
     ├── test_filing_cache.py
@@ -568,7 +598,6 @@ Environment and lockfile management uses **`uv`** (already installed). It can in
 - Older submission pages (R12).
 - Storing Company Facts responses or observations per accession number. The raw JSON isn't kept, so observations can only be re-checked by downloading again (D-021).
 - XBRL sign conventions. Company Facts gives no debit/credit balance, and `IncreaseDecrease…` concepts are often reported with the opposite sign. This belongs in the calculation design.
-- Section detection for 10-Qs that understands Parts I and II (D-022, required in M2).
 - Resolving fiscal periods and keeping all inputs to one calculation from the same filing. Both must be designed before calculations (M1 integration review B1/B2).
 
 **Out of scope until their milestones:** database and vector store, LLM, frontend, authentication, background workers, ticker resolution, a concept map, calculations, Docker.

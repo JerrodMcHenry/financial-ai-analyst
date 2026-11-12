@@ -9,7 +9,9 @@ import pytest
 from financial_analyst.filing_extractor import EXTRACTOR_VERSION, extract_filing
 from financial_analyst.sec_models import FilingDocument, FilingRef, SourceMetadata
 
-SAMPLE = (Path(__file__).parent / "fixtures" / "filing_sample.htm").read_bytes()
+FIXTURES = Path(__file__).parent / "fixtures"
+SAMPLE = (FIXTURES / "filing_sample.htm").read_bytes()
+SAMPLE_10Q = (FIXTURES / "filing_10q_sample.htm").read_bytes()
 
 
 def make_document(content: bytes, form: str = "10-K") -> FilingDocument:
@@ -192,25 +194,6 @@ def test_bullets_separated_only_by_css_get_a_space():
     assert [b.text for b in result.blocks] == ["• iPhone", "◦ iPad", "▪ Mac", "• Watch"]
 
 
-@pytest.mark.parametrize("form", ["10-Q", "10-Q/A"])
-def test_10q_keeps_every_block_but_assigns_no_10k_sections(sample, form):
-    document = make_document(SAMPLE, form=form)
-    result = extract_filing(document)
-
-    def without_section(blocks):
-        return [b.model_dump(exclude={"section"}) for b in blocks]
-
-    # Same blocks, text, order and locations as the 10-K extraction of the same bytes.
-    assert without_section(result.blocks) == without_section(sample.blocks)
-    assert all(b.section is None for b in result.blocks)
-    d = result.diagnostics
-    assert (d.sections_found, d.missing_sections, d.uncertain_sections) == ([], [], [])
-    assert d.warnings == [
-        f"Section detection is not yet supported for {form} filings; no sections assigned"
-    ]
-    assert (result.filing, result.source) == (document.filing, document.source)
-
-
 def test_10k_amendment_keeps_10k_section_detection(sample):
     result = extract_filing(make_document(SAMPLE, form="10-K/A"))
 
@@ -219,6 +202,143 @@ def test_10k_amendment_keeps_10k_section_detection(sample):
 
 
 def test_extractor_version_is_recorded_and_stable(sample):
-    assert EXTRACTOR_VERSION == "1"
+    assert EXTRACTOR_VERSION == "2"
     assert sample.extractor_version == EXTRACTOR_VERSION
     assert extract_filing(make_document(SAMPLE)).extractor_version == sample.extractor_version
+
+
+# --- 10-Q sections (M2.1) ---------------------------------------------------------------
+
+
+def html(*headings_and_paragraphs: str) -> bytes:
+    """Body of bold heading divs ("#text") and plain paragraph divs ("text")."""
+    divs = []
+    for text in headings_and_paragraphs:
+        if text.startswith("#"):
+            divs.append(f'<div><span style="font-weight:700">{text[1:]}</span></div>')
+        else:
+            divs.append(f"<div><span>{text}</span></div>")
+    return f"<html><body>{''.join(divs)}</body></html>".encode()
+
+
+def sections_by_text(result) -> dict[str, str | None]:
+    return {b.text: b.section for b in result.blocks if b.kind != "table"}
+
+
+@pytest.mark.parametrize("form", ["10-Q", "10-Q/A"])
+def test_10q_items_are_labeled_by_part(form):
+    result = extract_filing(make_document(SAMPLE_10Q, form=form))
+
+    assert [b.section for b in result.blocks] == [
+        None, None, None,                                       # cover, TOC table, PART I
+        "Part I, Item 1", "Part I, Item 1", "Part I, Item 1",   # heading, statements table, note
+        "Part I, Item 2", "Part I, Item 2", "Part I, Item 2",   # MD&A incl. cross-reference
+        "Part I, Item 3", "Part I, Item 3",
+        "Part I, Item 4", "Part I, Item 4",
+        None,                                                   # PART II
+        "Part II, Item 1", "Part II, Item 1",
+        "Part II, Item 1A", "Part II, Item 1A",
+        "Part II, Item 2", "Part II, Item 2",
+        "Part II, Item 6", "Part II, Item 6",
+    ]  # fmt: skip
+    d = result.diagnostics
+    assert d.sections_found == [
+        "Part I, Item 1", "Part I, Item 2", "Part I, Item 3", "Part I, Item 4",
+        "Part II, Item 1", "Part II, Item 1A", "Part II, Item 2", "Part II, Item 6",
+    ]  # fmt: skip
+    assert (d.missing_sections, d.uncertain_sections, d.warnings) == ([], [], [])
+
+
+def test_repeated_item_numbers_are_distinguished_by_part():
+    result = extract_filing(make_document(SAMPLE_10Q, form="10-Q"))
+
+    by_text = sections_by_text(result)
+    assert by_text["Net sales increased during the third quarter compared to the same "
+                   "quarter a year ago."] == "Part I, Item 2"  # fmt: skip
+    assert by_text["The Company repurchased shares during the quarter."] == "Part II, Item 2"
+    assert by_text["Disclosure controls and procedures were effective."] == "Part I, Item 4"
+
+
+def test_table_of_contents_and_part_references_in_paragraphs_are_not_boundaries():
+    result = extract_filing(make_document(SAMPLE_10Q, form="10-Q"))
+
+    toc = result.blocks[1]
+    assert (toc.kind, toc.element_id, toc.section) == ("table", "toc", None)
+    reference = next(b for b in result.blocks if b.text.startswith("Part II, Item 1A of the"))
+    assert (reference.kind, reference.section) == ("paragraph", "Part I, Item 2")
+
+
+def test_10q_blocks_are_identical_to_10k_extraction_apart_from_sections():
+    as_10q = extract_filing(make_document(SAMPLE_10Q, form="10-Q"))
+    as_10k = extract_filing(make_document(SAMPLE_10Q, form="10-K"))
+
+    def without_section(result):
+        return [b.model_dump(exclude={"section"}) for b in result.blocks]
+
+    assert without_section(as_10q) == without_section(as_10k)
+
+
+def test_items_without_a_part_heading_are_never_inferred():
+    result = extract_filing(make_document(html(
+        "#Item 1. Financial Statements", "Statements.",
+        "#Item 2. MD&amp;A", "Discussion.",
+    ), form="10-Q"))  # fmt: skip
+
+    assert all(b.section is None for b in result.blocks)
+    d = result.diagnostics
+    assert d.sections_found == []
+    assert d.uncertain_sections == ["Item 1 (Part unknown)", "Item 2 (Part unknown)"]
+    assert d.missing_sections == ["Part II, Item 1A"]  # Part I items are uncertain, not missing
+
+
+def test_duplicate_items_in_a_part_are_unassigned_but_others_are_kept():
+    result = extract_filing(make_document(html(
+        "#PART I", "#Item 1. Financial Statements", "Statements.",
+        "#Item 2. MD&amp;A", "First MD&amp;A.", "#Item 2. MD&amp;A", "Second MD&amp;A.",
+        "#PART II", "#Item 2. Unregistered Sales", "Repurchases.",
+    ), form="10-Q"))  # fmt: skip
+
+    by_text = sections_by_text(result)
+    assert by_text["Statements."] == "Part I, Item 1"
+    assert by_text["First MD&A."] is None and by_text["Second MD&A."] is None
+    assert by_text["Repurchases."] == "Part II, Item 2"  # same number, other Part: not a duplicate
+    assert result.diagnostics.uncertain_sections == ["Part I, Item 2"]
+
+
+def test_out_of_order_and_invalid_items_are_unassigned():
+    result = extract_filing(make_document(html(
+        "#PART I", "#Item 2. MD&amp;A", "Discussion.", "#Item 1. Financial Statements",
+        "Statements.", "#Item 1A. Risk Factors", "Risks in the wrong Part.",
+    ), form="10-Q"))  # fmt: skip
+
+    by_text = sections_by_text(result)
+    assert by_text["Discussion."] == "Part I, Item 2"
+    assert by_text["Statements."] is None
+    assert by_text["Risks in the wrong Part."] is None
+    assert result.diagnostics.uncertain_sections == ["Part I, Item 1", "Part I, Item 1A"]
+
+
+def test_part_headings_out_of_order_stop_all_later_labeling():
+    # A table of contents written as bold divs (not a <table>) repeats the Part headings.
+    result = extract_filing(make_document(html(
+        "#PART I", "#Item 2. MD&amp;A", "#PART II", "#Item 1A. Risk Factors",
+        "#PART I", "#Item 2. MD&amp;A", "Real discussion.",
+        "#PART II", "#Item 1A. Risk Factors", "Real risks.",
+    ), form="10-Q"))  # fmt: skip
+
+    # Not even the table-of-contents lines before the break keep a label.
+    assert all(b.section is None for b in result.blocks)
+    assert result.diagnostics.sections_found == []
+    assert {"Part I, Item 2", "Part II, Item 1A"} <= set(result.diagnostics.uncertain_sections)
+    assert any("Unexpected 10-Q Part heading" in w for w in result.diagnostics.warnings)
+
+
+def test_forms_without_section_rules_get_none_and_a_warning():
+    result = extract_filing(make_document(SAMPLE, form="8-K"))
+
+    assert all(b.section is None for b in result.blocks)
+    d = result.diagnostics
+    assert (d.sections_found, d.missing_sections, d.uncertain_sections) == ([], [], [])
+    assert d.warnings == [
+        "Section detection is not yet supported for 8-K filings; no sections assigned"
+    ]

@@ -192,3 +192,30 @@ Status values: **Proposed** (awaiting owner approval), **Accepted**, **Supersede
 3. A disagreeing press-release 8-K value made 10-K values look "revised" when they weren't.
 
 **Deferred:** older submission pages (R12), storing Company Facts per accession, XBRL sign conventions.
+
+## D-023 Section detection for 10-Qs that understands Parts I and II
+**Status:** Accepted (owner-directed M2.1, 2026-11-12; live-verified 2026-11-12)
+**Decision:** `filing_extractor._assign_10q_sections` labels 10-Q and 10-Q/A content `"Part I, Item 2"`, `"Part II, Item 1A"` and so on. The 10-K rules and labels are unchanged. `EXTRACTOR_VERSION` goes to `"2"`.
+- **Boundaries:** only heading blocks that start with "Part I/II" or "Item N" (tables and paragraphs are ignored).
+- **No guessing:** Part headings are never inferred; an Item without one is `"Item N (Part unknown)"` and uncertain.
+- **Part order:** Parts must run I then II. Any break leaves the **whole document** unlabeled.
+- **Items:** labeled only when valid for their Part, unique within it and in order.
+- **Missing vs uncertain:** a priority section is reported missing only when no heading for it exists at all.
+**Why:** a 10-Q repeats Item numbers across Parts with different meanings, so the Part is part of the identity. Every ambiguous case fails safe: content is unassigned and reported, never labeled with a guess. Discarding all labels when the Part order breaks is deliberate. During testing, a table of contents written as headings otherwise took the "Part I, Item 2" label instead of the real MD&A.
+**Alternatives:**
+- Inferring Parts from item order or repetition: rejected, because it invents structure.
+- Labeling only the items after a break: rejected, because a table of contents before the break can still take labels.
+- Unqualified labels for 10-Qs: rejected, because they're ambiguous.
+
+**Live verification** (extractor v2; 4 SEC requests; no incorrect section assignments in either filing):
+- **Apple 10-Q `0000320193-26-000020`:** 304 blocks, 269 labeled. All 11 items detected, no warnings.
+- **JPMorgan Chase 10-Q `0001628280-26-069523`:** 2,509 blocks, 0 labeled.
+  - Its plain-text Item lines aren't recognized as boundaries.
+  - Its Part I uses topic headings and a cross-reference index rather than explicit Item 1/2 body headings.
+  - Content was conservatively left unassigned.
+
+Improved detection for that format is deliberately not implemented in M2.1.
+
+**Constraint carried into M2.2/M2.3:**
+- Retrieval must work without section labels. A missing section must not prevent building passages, indexing, searching or verifying citations.
+- An explicit section filter keeps its meaning: it returns only passages with that label, possibly none. It never silently returns unrelated passages.

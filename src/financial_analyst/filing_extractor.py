@@ -18,7 +18,7 @@ from financial_analyst.sec_models import FilingDocument, FilingRef, SourceMetada
 
 # Bump whenever a change could alter block text, kinds, order, indexes or locations for the
 # same input bytes. Stored chunk/citation ids must include this and the source SHA-256.
-EXTRACTOR_VERSION = "1"
+EXTRACTOR_VERSION = "2"  # 2: Part-aware 10-Q section labels (M2.1)
 
 # Elements whose content is never displayed as filing text. `ix:header` holds inline
 # XBRL's hidden facts and contexts, which would otherwise read as duplicate narrative.
@@ -44,15 +44,20 @@ _WHITESPACE = re.compile(r"\s+")
 # Filings often separate a bullet from its text with CSS padding rather than a space.
 _BULLET_WITHOUT_SPACE = re.compile(r"([\u2022\u25e6\u25aa])(?=\S)")  # • ◦ ▪
 
-# Section detection only understands Form 10-K item numbering. A 10-Q repeats Items 1-4 in
-# Part I and Part II with different meanings, so 10-K rules would mislabel or misreport it.
-SECTION_DETECTION_FORMS = frozenset({"10-K", "10-K/A"})
+# Forms whose section structure the extractor understands. 10-K items are numbered once
+# across the document; a 10-Q numbers items separately within Part I and Part II.
+_10K_FORMS = frozenset({"10-K", "10-K/A"})
+_10Q_FORMS = frozenset({"10-Q", "10-Q/A"})
+SECTION_DETECTION_FORMS = _10K_FORMS | _10Q_FORMS
 # Form 10-K items in their required order.
 _FORM_10K_ITEMS = (
     "1", "1A", "1B", "1C", "2", "3", "4", "5", "6", "7", "7A", "8",
     "9", "9A", "9B", "9C", "10", "11", "12", "13", "14", "15", "16",
 )  # fmt: skip
 PRIORITY_SECTIONS = ("Item 1", "Item 1A", "Item 7", "Item 8")
+# Form 10-Q items allowed in each Part, in their required order.
+_FORM_10Q_ITEMS = {"I": ("1", "2", "3", "4"), "II": ("1", "1A", "2", "3", "4", "5", "6")}
+PRIORITY_10Q_SECTIONS = ("Part I, Item 1", "Part I, Item 2", "Part II, Item 1A")
 _ITEM_HEADING = re.compile(r"item\s*(\d{1,2}[a-c]?)\b", re.IGNORECASE)
 _PART_HEADING = re.compile(r"part\s+(iv|i{1,3})\b", re.IGNORECASE)
 
@@ -120,9 +125,12 @@ def extract_filing(document: FilingDocument) -> ExtractedFiling:
     _flush(root, raw_blocks)
 
     form = document.filing.form
-    if form in SECTION_DETECTION_FORMS:
+    if form in _10K_FORMS:
         sections, (found, uncertain) = _assign_sections(raw_blocks, warnings)
         missing = [s for s in PRIORITY_SECTIONS if s not in found and s not in uncertain]
+    elif form in _10Q_FORMS:
+        sections, (found, uncertain) = _assign_10q_sections(raw_blocks, warnings)
+        missing = _missing_10q_sections(found, uncertain)
     else:
         sections, found, uncertain, missing = [None] * len(raw_blocks), [], [], []
         warnings.append(
@@ -371,11 +379,108 @@ def _assign_sections(
 
     if not boundaries:
         warnings.append("No Item headings detected; no content was assigned to sections")
+    return _label_regions(len(blocks), labels), (found, uncertain)
 
+
+def _assign_10q_sections(
+    blocks: list[_RawBlock], warnings: list[str]
+) -> tuple[list[str | None], tuple[list[str], list[str]]]:
+    """Label 10-Q blocks such as "Part I, Item 2", or None when the evidence is insufficient.
+
+    A 10-Q numbers items separately in Part I (financial information) and Part II (other
+    information), so an item only means something together with the Part heading above it.
+    Boundaries are heading blocks that start with "Part I"/"Part II" or "Item N"; tables
+    (tables of contents) and paragraphs (cross-references) are ignored.
+
+    Conservative rules: a Part heading is never inferred, so an item with no Part heading
+    above it is unassigned. Parts must run I then II; any other Part heading (going back to
+    Part I, or a Part III) means the Part structure cannot be trusted, and nothing in the
+    document is labeled (a table of contents written as headings would otherwise take the
+    labels). An item is labeled only if it is valid for its Part, occurs once in that Part,
+    and comes in order. Everything else is unassigned and reported as uncertain.
+    """
+    boundaries: list[tuple[int, str | None, str | None]] = []  # (block index, part, item)
+    current_part: str | None = None
+    parts_trusted = True
+    for i, block in enumerate(blocks):
+        if block.kind != "heading":
+            continue
+        part = _PART_HEADING.match(block.text)
+        item = _ITEM_HEADING.match(block.text)
+        if part:
+            roman = part.group(1).upper()
+            if parts_trusted and (
+                roman not in _FORM_10Q_ITEMS or (current_part, roman) == ("II", "I")
+            ):
+                parts_trusted = False
+                warnings.append(
+                    f"Unexpected 10-Q Part heading {block.text[:40]!r}; "
+                    "content from here on is unassigned"
+                )
+            current_part = roman if parts_trusted else None
+            boundaries.append((i, None, None))  # a Part heading ends the previous item
+        elif item:
+            boundaries.append((i, current_part, item.group(1).upper()))
+
+    counts = Counter((part, item) for _, part, item in boundaries if part and item)
+    labels: dict[int, str | None] = {}
+    found: list[str] = []
+    uncertain: list[str] = []
+
+    def mark_uncertain(name: str, problem: str) -> None:
+        if name not in uncertain:
+            uncertain.append(name)
+            warnings.append(f"{name} heading {problem}; its content is unassigned")
+
+    last_position = (-1, -1)
+    for i, part, item in boundaries:
+        labels[i] = None
+        if item is None:
+            continue
+        if part is None:
+            mark_uncertain(f"Item {item} (Part unknown)", "has no trusted Part heading above it")
+            continue
+        name = f"Part {part}, Item {item}"
+        if item not in _FORM_10Q_ITEMS[part]:
+            mark_uncertain(name, f"is not a valid Part {part} item in a 10-Q")
+        elif counts[(part, item)] > 1:
+            mark_uncertain(name, f"appears {counts[(part, item)]} times")
+        else:
+            position = (0 if part == "I" else 1, _FORM_10Q_ITEMS[part].index(item))
+            if position <= last_position:
+                mark_uncertain(name, "is out of order")
+            else:
+                labels[i] = name
+                found.append(name)
+                last_position = position
+
+    if not parts_trusted:  # discard every label, including ones given before the break
+        for name in found:
+            mark_uncertain(name, "may belong to an untrusted Part structure")
+        labels, found = {}, []
+    if not any(item for _, _, item in boundaries):
+        warnings.append("No Item headings detected; no content was assigned to sections")
+    return _label_regions(len(blocks), labels), (found, uncertain)
+
+
+def _missing_10q_sections(found: list[str], uncertain: list[str]) -> list[str]:
+    """Priority 10-Q sections with no heading at all. An item seen without a Part heading
+    is uncertain rather than missing, for whichever Part it might belong to."""
+    missing = []
+    for name in PRIORITY_10Q_SECTIONS:
+        item = name.split("Item ")[1]
+        if name not in found and name not in uncertain:
+            if f"Item {item} (Part unknown)" not in uncertain:
+                missing.append(name)
+    return missing
+
+
+def _label_regions(block_count: int, labels: dict[int, str | None]) -> list[str | None]:
+    """Each boundary's label applies to it and every following block until the next one."""
     sections: list[str | None] = []
     current = None
-    for i in range(len(blocks)):
+    for i in range(block_count):
         if i in labels:
             current = labels[i]
         sections.append(current)
-    return sections, (found, uncertain)
+    return sections

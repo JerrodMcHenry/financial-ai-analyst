@@ -101,8 +101,8 @@ for block in extracted.blocks[:10]:
 
 Each block is a heading, paragraph or table, in document order. Tables keep their cell grid in
 `block.rows`. `dom_path` plus the document's SHA-256 says exactly where each block came from.
-Form 10-K sections are assigned only when their headings are unambiguous. 10-Q filings are
-extracted in full but get no section labels yet (a warning says so). Each result records
+Sections are assigned only when their headings are unambiguous: `"Item 1A"` for 10-Ks and
+Part-qualified `"Part I, Item 2"` for 10-Qs, whose item numbers repeat across Parts. Each result records
 `extractor_version`; together with the source SHA-256 it identifies the exact blocks. See
 [docs/architecture.md](docs/architecture.md) §3.2b for the guarantees and limitations.
 
