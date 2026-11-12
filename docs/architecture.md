@@ -1,0 +1,310 @@
+# Architecture — Enterprise Financial AI Analyst
+
+Status: **Approved for Milestone 0, Phase B** (owner approval 2026-11-11). Later-milestone sections are design intent, not commitments.
+Last updated: 2026-11-11
+
+---
+
+## 1. Current repository state
+
+| Item | Finding |
+|---|---|
+| Project directory | `/Users/j/Desktop/enterprise-financial-ai-analyst` was **empty** before this document. |
+| Git | Originally had no repository of its own (the enclosing repo was the home directory). **Resolved:** the owner initialized a project repository on `main`, remote `https://github.com/JerrodMcHenry/financial-ai-analyst.git`, with an initial commit containing `README.md`. |
+| Python | 3.13.5 is installed (python.org and Anaconda builds). No 3.12 interpreter is installed. |
+| Tooling | `uv` 0.11.14 is installed. Docker is **not** installed (needed in a later milestone). |
+
+Nothing reusable exists, so this is a greenfield design.
+
+---
+
+## 2. System overview
+
+This is a **modular monolith**: one deployable FastAPI service, organized into packages with clear boundaries. Each package corresponds to a capability that will be added in a specific milestone.
+
+```
+                         ┌──────────────────────────────────────────────┐
+  Analyst UI  ──HTTP──▶  │ FastAPI app (api)                            │
+  (Next.js, later)       │   /health   /research (later)                │
+                         ├──────────────────────────────────────────────┤
+                         │ agent      : LLM tool-calling loop (later)   │
+                         │ tools      : validated tool schemas (later)  │
+                         │ calc       : deterministic finance (later)   │
+                         │ retrieval  : facts + passages (later)        │
+                         │ ingestion  : EDGAR → normalized store (later)│
+                         │ sec        : EDGAR HTTP client  ◀── M0       │
+                         │ config     : env-based settings ◀── M0       │
+                         └───────┬───────────────────────┬──────────────┘
+                                 │                       │
+                       SEC EDGAR (data.sec.gov,   PostgreSQL + pgvector
+                       www.sec.gov/Archives)      (later)
+```
+
+Key separation: **the SEC client is only used by ingestion**, never directly on the user's question path. Analyst questions are answered from our own normalized store. This keeps the request path fast and predictable, keeps SEC traffic low and cacheable, and makes evaluations reproducible.
+
+---
+
+## 3. Request and data flows
+
+### 3.1 Milestone 0: health check (implemented in Phase B)
+
+```
+GET /health
+  → uvicorn (ASGI server) → FastAPI router → health handler
+  → 200 {"status": "ok", "version": "0.1.0"}
+```
+
+This is a liveness check only. It performs no SEC or database calls, so an outage of a dependency does not make the process look dead. A separate readiness check can be added when a database exists.
+
+### 3.2 Milestone 0: company submissions fetch (implemented in Phase B)
+
+```
+caller (test or script)
+  → SecClient.get_submissions(cik="320193")
+      1. validate + normalize CIK        → "0000320193"
+      2. build URL                       → https://data.sec.gov/submissions/CIK0000320193.json
+      3. _pace()                         → enforce min interval between requests
+      4. httpx GET (User-Agent, timeouts)
+      5. retry loop on 429 / 5xx / timeout (bounded, exponential backoff + jitter, honors Retry-After)
+      6. map final status → typed exception (not found / rate limited / unavailable)
+      7. parse JSON → Pydantic validation
+  ← CompanySubmissions (company info + list[FilingRef] + SourceMetadata)
+```
+
+There is no HTTP endpoint for this in Phase B. The owner decided against a debug route (D-016), so the client stays internal until ingestion exists.
+
+### 3.3 Later milestone: ingestion
+
+```
+ticker → CIK (company_tickers.json)
+  → submissions → select 10-K / 10-Q (amendments kept distinct)
+  ├─▶ Company Facts (XBRL JSON) → normalize facts → facts table          [structured path]
+  └─▶ primary document (HTML) → clean → split into Items (1A, 7, …)
+        → chunk → embed → pgvector, each chunk carrying provenance       [narrative path]
+  raw responses cached on disk / in DB, keyed by URL and content hash
+```
+
+### 3.4 Later milestone: research question
+
+```
+POST /research {question}
+  → agent loop (native LLM tool calling, no framework)
+      LLM proposes tool call ──▶ arguments validated by Pydantic ──▶ deterministic execution
+        get_financial_facts(cik, concept, periods)   → facts with fact_ids
+        search_filings(cik, query, forms, years)     → passages with chunk_ids
+        compute_metric(name, inputs by fact_id)      → result + formula + input ids
+      tool results are returned to the LLM as data, delimited and marked untrusted
+  → LLM drafts answer that cites fact_ids / chunk_ids
+  → citation validator: every cited id must have come from this request's tool results;
+    every number in the answer must match a tool output (otherwise flagged or rejected)
+  → response: answer + resolved citations (URL, accession, period, unit) + telemetry
+```
+
+---
+
+## 4. Proposed directory structure
+
+### 4.1 Current structure (after the Phase B simplification)
+
+```
+enterprise-financial-ai-analyst/
+├── pyproject.toml              # deps, tool config, Python ≥3.12
+├── uv.lock                     # reproducible lockfile
+├── README.md
+├── .env.example                # placeholder values only
+├── .gitignore
+├── CLAUDE.md                   # permanent engineering rules for this repo
+├── docs/
+│   ├── architecture.md
+│   └── decisions.md
+├── src/
+│   └── financial_analyst/
+│       ├── __init__.py
+│       ├── main.py             # FastAPI app + GET /health
+│       ├── config.py           # Settings (pydantic-settings)
+│       ├── sec_client.py       # SecClient: pacing, retries, error mapping, get_submissions
+│       └── sec_models.py       # SourceMetadata, FilingRef, CompanySubmissions
+└── tests/
+    ├── conftest.py             # shared settings fixture
+    ├── fixtures/
+    │   └── submissions_sample.json   # trimmed, realistic EDGAR payload
+    ├── test_config.py
+    ├── test_health.py
+    └── test_sec_client.py
+```
+
+There are no subfolders. SEC code is split into two flat modules because they have different jobs: `sec_client.py` handles transport (HTTP, pacing, retries, parsing) and `sec_models.py` holds the data contracts that later milestones will import. A folder is created only once several modules genuinely belong together (D-017).
+
+### 4.2 Indicative future capabilities (not created now)
+
+Ingestion, storage (Postgres/pgvector), retrieval, calculations, LLM access, the agent loop, evals, observability, and the web UI (Next.js, in a separate directory). Each is added only in its milestone, and starts as a single module rather than a folder.
+
+---
+
+## 5. SEC client interface
+
+```python
+class SecClient:
+    """Synchronous EDGAR client. One instance per process; reuses a connection pool."""
+
+    def __init__(self, settings: Settings, transport: httpx.BaseTransport | None = None) -> None: ...
+        # transport is httpx's own hook; tests pass httpx.MockTransport (no network).
+        # Tests replace time.sleep with pytest's monkeypatch, so nothing really waits.
+
+    def get_submissions(self, cik: str | int) -> CompanySubmissions: ...
+
+    # Added in Milestone 1 (same private plumbing, no new abstractions):
+    # def get_company_facts(self, cik: str | int) -> CompanyFacts: ...
+    # def get_filing_document(self, filing: FilingRef) -> FilingDocument: ...
+
+    def close(self) -> None: ...
+    def __enter__(self) / __exit__(...)  # context-manager support
+
+    # private
+    def _get(self, url: str) -> httpx.Response: ...          # pacing + retries + status mapping
+    def _get_json(self, url: str) -> tuple[dict, SourceMetadata]: ...
+```
+
+Behavior:
+
+| Concern | Design |
+|---|---|
+| Identification | `User-Agent` header from `SEC_USER_AGENT`, required at startup and validated to contain a contact email (SEC format: `"Name contact@example.com"`). |
+| Pacing | Minimum interval between requests, enforced with a `threading.Lock` and a monotonic clock. Default **4 req/s** (`SEC_MAX_REQUESTS_PER_SECOND=4`). Config validation **rejects values above 10**, which is SEC's published limit. |
+| Timeouts | Explicit: connect 5s, read 20s, write/pool 10s. Named constants in `sec_client.py`, not env vars. |
+| Retries | Bounded: `MAX_RETRIES = 3` (constant). Retry on 429, 500, 502, 503, 504, timeouts and connection errors. Exponential backoff with jitter (`BACKOFF_BASE_SECONDS = 1`), capped at `BACKOFF_MAX_SECONDS = 30`. `Retry-After` is honored. If it asks for more than the cap, the client stops instead of retrying early. No retry on other 4xx. |
+| Errors | Three classes. `SecError` covers any failure and carries `status_code` (None for timeouts and connection errors). Two subclasses: `SecNotFoundError` (404) and `SecResponseError` (invalid JSON or schema mismatch). Callers never see raw `httpx` exceptions. |
+| Input validation | CIK must be 1–10 digits, then zero-padded to 10. Anything else raises `ValueError` before any network call. |
+| Caching | Deferred to Milestone 1 (D-013). The `_get_json` seam is where a cache will be added. |
+
+**Why synchronous:** SEC access is rate-limited batch ingestion, so concurrency gains little under a global 4 req/s cap. Sync code is simpler to read, test and debug. If a FastAPI route ever calls it, a plain `def` route runs in FastAPI's threadpool, which the lock handles. Revisit only if profiling shows a need. (Decision D-004.)
+
+---
+
+## 6. Source metadata contract
+
+Provenance is captured at three levels. Only level 1 and the filing reference are implemented in Phase B. The rest is defined now so later code has a fixed target.
+
+### Level 1: every HTTP retrieval (`SourceMetadata`, Phase B)
+
+| Field | Type | Notes |
+|---|---|---|
+| `source_url` | `HttpUrl` | Exact URL fetched |
+| `retrieved_at` | `datetime` (UTC, tz-aware) | |
+| `http_status` | `int` | |
+| `content_sha256` | `str` | Hash of the raw body. Detects upstream changes and supports caching. |
+
+### Filing reference (`FilingRef`, Phase B)
+
+| Field | Type | Notes |
+|---|---|---|
+| `cik` | `str` (10 digits) | |
+| `accession_number` | `str` | Format `0000320193-23-000106`, validated by regex |
+| `form` | `str` | e.g. `10-K`, `10-K/A`, `10-Q`. Amendments kept as distinct forms. |
+| `filing_date` | `date` | |
+| `report_date` | `date \| None` | Period of report |
+| `acceptance_datetime` | `datetime \| None` | |
+| `primary_document` | `str` | e.g. `aapl-20230930.htm` |
+| `primary_document_url` | `HttpUrl` | Derived: `https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession_no_dashes}/{primary_document}` |
+| `is_xbrl`, `is_inline_xbrl` | `bool` | |
+
+`CompanySubmissions` = `cik`, `name`, `tickers`, `exchanges`, `sic`, `sic_description`, `fiscal_year_end` (`"MMDD"`), `recent_filings: list[FilingRef]`, `has_more_filings: bool`, `source: SourceMetadata`.
+
+EDGAR returns `filings.recent` as parallel arrays (one array per field). The parser zips them into rows and **raises `SecResponseError` if the array lengths differ**, rather than silently misaligning fields.
+
+### Level 2: structured fact (`FactRecord`, Milestone 1, design only)
+
+`fact_id`, `cik`, `taxonomy` (`us-gaap`/`dei`/`ifrs-full`), `concept`, `unit` (`USD`, `shares`, `USD/shares`, `pure`), `value: Decimal`, `period_start: date | None` (None means an instant fact), `period_end: date`, `fy`, `fp`, `form`, `filed`, `accession_number`, `frame | None`, `source_url`.
+
+### Level 3: narrative passage (`ChunkRecord`, later, design only)
+
+`chunk_id`, `accession_number`, `form`, `document_url`, `section` (e.g. `Item 7`), `char_start`, `char_end`, `text_sha256`, `fiscal_period` (from the filing), `text`.
+
+### Citations (later)
+
+A citation is a **reference to a `fact_id` or `chunk_id` that was returned by a tool during the same request**. The model never writes URLs or accession numbers itself. The server resolves ids to provenance after the fact. An id that was not retrieved in the request is treated as invented, and the answer is rejected or flagged.
+
+---
+
+## 7. Structured XBRL retrieval vs. narrative document retrieval
+
+| | Structured (XBRL Company Facts) | Narrative (filing documents) |
+|---|---|---|
+| Source | `data.sec.gov/api/xbrl/companyfacts/CIK##########.json` | Primary 10-K/10-Q HTML in `/Archives/edgar/data/…` |
+| Shape | Typed numeric facts: concept × period × unit × value, each with accession number | Unstructured prose and HTML tables |
+| Answers | **"What"** questions: revenue FY2023, diluted EPS trend, gross margin inputs | **"Why"** questions: drivers in MD&A, risk factors, guidance language, accounting policies |
+| Retrieval method | Exact lookup (SQL filter by CIK, concept, period, unit). No embeddings. | Hybrid search: lexical (BM25 / Postgres full-text) plus vector similarity, filtered by company, form and period metadata |
+| Correctness | Deterministic. The value is either present or absent. | Probabilistic. Relevance must be evaluated (recall@k, citation accuracy). |
+| Main pitfalls | Concept choice varies by company (`Revenues` vs `RevenueFromContractWithCustomerExcludingAssessedTax`). `fy`/`fp` describe the *filing*, not the fact's period. Restatements. Q4 is often not reported directly. Dimensional (segment) facts are not included. | HTML noise, tables that chunk poorly, unreliable item boundaries, scale stated in prose ("in millions"), prompt injection |
+
+**Rule adopted:** numbers used in answers or calculations come from structured facts through tools. Narrative retrieval supplies explanation and context. A number found only in text (for example a non-GAAP measure) can be quoted with its citation, but it is labeled as text-sourced and is never fed into `calc` silently.
+
+---
+
+## 8. Dependencies
+
+### Phase B runtime
+
+| Package | Why |
+|---|---|
+| `fastapi` | Required HTTP framework. Provides typed routing, Pydantic integration and OpenAPI docs. |
+| `uvicorn` | ASGI server that runs FastAPI. The plain package is enough; the `[standard]` extras are not needed yet. |
+| `pydantic` (v2) | Data contracts and validation. Already a FastAPI dependency; listed explicitly because we use it directly. |
+| `pydantic-settings` | Typed, validated settings from environment and `.env`. Since Pydantic v2 this is a separate package. Avoids hand-written env parsing. |
+| `httpx` | HTTP client with explicit timeouts, connection pooling and **built-in `MockTransport`** for network-free tests. FastAPI's `TestClient` also uses it. |
+
+### Phase B development
+
+| Package | Why |
+|---|---|
+| `pytest` | Required test runner. |
+| `ruff` | Linter and formatter in one tool, with minimal configuration (owner decision, D-015). |
+
+### Deliberately not added
+
+| Package | Reason |
+|---|---|
+| `respx` / `responses` | `httpx.MockTransport` covers the mocking needs. |
+| `tenacity` / `backoff` | The retry policy is about 25 readable lines and must be explicit for review. |
+| `requests` / `aiohttp` | `httpx` covers both needs. |
+| `python-dotenv` | `pydantic-settings` reads `.env` natively. |
+| LangChain / LlamaIndex / agent frameworks | Native tool calling is a stated requirement. Also out of scope for M0. |
+
+Environment and lockfile management uses **`uv`** (already installed). It can install Python 3.12 on demand, so the project pins `requires-python = ">=3.12"` and runs the same way on 3.12 and 3.13.
+
+---
+
+## 9. Key technical risks
+
+| # | Risk | Mitigation |
+|---|---|---|
+| R1 | ~~The project sat inside a git repo rooted at the home directory.~~ **Resolved** by the owner creating a dedicated project repository. | Phase B adds a `.gitignore` that excludes `.env`, virtual environments and caches. |
+| R2 | SEC blocks clients that exceed fair-access limits or omit a User-Agent. | Required and validated User-Agent, 4 req/s default, config cap at 10, backoff on 429/503, caching in M1. |
+| R3 | Fiscal period semantics. `fy`/`fp` in Company Facts belong to the filing, so a FY2023 10-K also reports FY2021–22 values tagged `fy=2023`. Non-calendar fiscal years (Apple ends in September). 52/53-week years. | Key facts by `(period_start, period_end)` and use `fy`/`fp` only as filing metadata. Store the company's `fiscal_year_end`. Never infer periods from `fy` alone. |
+| R4 | Restatements and duplicates: the same concept and period with different values across filings. | Keep every observation with its accession number. "Latest filed" is an explicit selection policy, and conflicting values are surfaced, never averaged or merged silently. |
+| R5 | Q4 and other derived values (Q4 = FY minus 9M YTD). | Derived only in `calc`, labeled `derived`, with input fact_ids attached. |
+| R6 | Concept heterogeneity and company extension concepts. | An explicit, versioned concept map for core metrics, with per-company overrides and evaluations covering it. |
+| R7 | Company Facts excludes dimensional facts (segments, geography). | Document as a scope limit. Later, parse the XBRL instance or the SEC Financial Statement Data Sets if segment data is needed. |
+| R8 | Filing HTML parsing (inline XBRL markup, tables, item detection). | Dedicated parser milestone with fixture-based tests. Store the parse version on each chunk. |
+| R9 | Prompt injection through filing text. | Tool output passed as delimited data. System prompt states that retrieved text has no authority. Tool allowlist with validated arguments. No tool has side effects. Red-team cases included in evals. |
+| R10 | Invented citations or hallucinated numbers. | Id-based citations, server-side citation validation, and number matching against tool outputs. |
+| R11 | Float rounding errors in financial values. | `Decimal` for values. Explicit rounding only at presentation. |
+| R12 | Submissions pagination. `filings.recent` holds only the most recent filings (at least one year or 1,000 filings); older ones are in `filings.files`. | Expose `has_more_filings` in M0. Follow pages in M1. |
+| R13 | Building evaluation ground truth. | Small hand-verified golden set built from XBRL values with accession numbers. Grows over time. |
+| R14 | Docker is not installed locally. | Needed only for the Postgres and deployment milestones. Install before then. |
+
+---
+
+## 10. Out of scope for Milestone 0
+
+Database, vector store, LLM, frontend, authentication, background workers, ingestion pipeline, ticker resolution, Company Facts, filing documents, caching, Docker.
+
+---
+
+## 11. Open questions (all resolved for Phase B)
+
+- ~~**Q1 Caching.**~~ Resolved: deferred to Milestone 1 (D-013).
+- ~~**Q2 Submissions endpoint.**~~ Resolved: no debug endpoint (D-016).
+- ~~**Q3 Git repository.**~~ Resolved: the owner created a dedicated repository.
+- ~~**Q4 Ruff.**~~ Resolved: added as a dev dependency with minimal configuration (D-015).
+- ~~**Q5 Package name.**~~ Resolved: `financial_analyst` (D-002).
