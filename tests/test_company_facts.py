@@ -307,3 +307,44 @@ def test_selection_does_not_depend_on_sec_row_order(settings, facts):
             a = select_fact(facts, "us-gaap", concept, unit, start, end, policy)
             b = select_fact(reordered, "us-gaap", concept, unit, start, end, policy)
             assert (a.selected, a.candidates, a.reason) == (b.selected, b.candidates, b.reason)
+
+
+def _revenue_payload(*rows: tuple[str, str, int, str]) -> bytes:
+    """Minimal payload: FY2024 revenue rows as (form, filed, value, accession)."""
+    usd = [
+        {"start": "2023-10-01", "end": "2024-09-28", "val": value, "accn": accn, "form": form,
+         "filed": filed}
+        for form, filed, value, accn in rows
+    ]  # fmt: skip
+    facts = {"us-gaap": {"Revenues": {"label": "Revenues", "units": {"USD": usd}}}}
+    return json.dumps({"cik": 320193, "entityName": "Apple Inc.", "facts": facts}).encode()
+
+
+def test_ineligible_form_disagreement_is_not_a_conflict(settings):
+    body = _revenue_payload(
+        ("8-K", "2024-10-31", 391000000000, "0000320193-24-000120"),  # press-release value
+        ("10-K", "2024-11-01", 391035000000, "0000320193-24-000123"),
+    )
+    facts, _ = fetch(settings, body)
+
+    for policy in ("latest_filed", "original"):
+        result = select_fact(facts, "us-gaap", "Revenues", "USD", *FY2024, policy=policy)
+        assert result.selected.form == "10-K"
+        assert [c.form for c in result.candidates] == ["8-K", "10-K"]  # 8-K still visible
+        assert result.conflicting_values is False
+        assert "different value" not in result.reason
+
+
+def test_eligible_filings_that_disagree_are_still_a_conflict(settings):
+    body = _revenue_payload(
+        ("8-K", "2024-10-31", 391035000000, "0000320193-24-000120"),  # agrees with the 10-K
+        ("10-K", "2024-11-01", 391035000000, "0000320193-24-000123"),
+        ("10-K/A", "2025-01-15", 391040000000, "0000320193-25-000010"),
+    )
+    facts, _ = fetch(settings, body)
+
+    result = select_fact(facts, "us-gaap", "Revenues", "USD", *FY2024)
+
+    assert result.conflicting_values is True
+    assert (result.selected.form, result.selected.value) == ("10-K/A", Decimal("391040000000"))
+    assert "other eligible filings report a different value" in result.reason

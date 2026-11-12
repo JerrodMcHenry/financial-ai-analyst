@@ -16,6 +16,10 @@ from pydantic import BaseModel, ConfigDict
 
 from financial_analyst.sec_models import FilingDocument, FilingRef, SourceMetadata
 
+# Bump whenever a change could alter block text, kinds, order, indexes or locations for the
+# same input bytes. Stored chunk/citation ids must include this and the source SHA-256.
+EXTRACTOR_VERSION = "1"
+
 # Elements whose content is never displayed as filing text. `ix:header` holds inline
 # XBRL's hidden facts and contexts, which would otherwise read as duplicate narrative.
 _SKIP_TAGS = frozenset(
@@ -40,6 +44,9 @@ _WHITESPACE = re.compile(r"\s+")
 # Filings often separate a bullet from its text with CSS padding rather than a space.
 _BULLET_WITHOUT_SPACE = re.compile(r"([\u2022\u25e6\u25aa])(?=\S)")  # • ◦ ▪
 
+# Section detection only understands Form 10-K item numbering. A 10-Q repeats Items 1-4 in
+# Part I and Part II with different meanings, so 10-K rules would mislabel or misreport it.
+SECTION_DETECTION_FORMS = frozenset({"10-K", "10-K/A"})
 # Form 10-K items in their required order.
 _FORM_10K_ITEMS = (
     "1", "1A", "1B", "1C", "2", "3", "4", "5", "6", "7", "7A", "8",
@@ -84,7 +91,8 @@ class ExtractionDiagnostics(BaseModel):
     heading_count: int
     table_count: int
     sections_found: list[str]
-    missing_sections: list[str]  # priority sections with no heading found
+    # Priority 10-K sections with no heading found; empty when detection does not apply.
+    missing_sections: list[str]
     uncertain_sections: list[str]  # headings found, but boundaries are ambiguous
     warnings: list[str]
 
@@ -94,6 +102,7 @@ class ExtractedFiling(BaseModel):
 
     filing: FilingRef
     source: SourceMetadata  # identifies the exact bytes the dom_paths refer to
+    extractor_version: str  # with source.content_sha256, identifies these exact blocks
     blocks: list[ContentBlock]
     diagnostics: ExtractionDiagnostics
 
@@ -110,7 +119,15 @@ def extract_filing(document: FilingDocument) -> ExtractedFiling:
     _walk(soup, "", False, root, raw_blocks)
     _flush(root, raw_blocks)
 
-    sections, section_report = _assign_sections(raw_blocks, warnings)
+    form = document.filing.form
+    if form in SECTION_DETECTION_FORMS:
+        sections, (found, uncertain) = _assign_sections(raw_blocks, warnings)
+        missing = [s for s in PRIORITY_SECTIONS if s not in found and s not in uncertain]
+    else:
+        sections, found, uncertain, missing = [None] * len(raw_blocks), [], [], []
+        warnings.append(
+            f"Section detection is not yet supported for {form} filings; no sections assigned"
+        )
     blocks = [
         ContentBlock(
             index=i,
@@ -127,7 +144,6 @@ def extract_filing(document: FilingDocument) -> ExtractedFiling:
         warnings.append("No content blocks were extracted")
 
     kinds = Counter(block.kind for block in blocks)
-    found, uncertain = section_report
     diagnostics = ExtractionDiagnostics(
         encoding=encoding,
         block_count=len(blocks),
@@ -135,12 +151,16 @@ def extract_filing(document: FilingDocument) -> ExtractedFiling:
         heading_count=kinds["heading"],
         table_count=kinds["table"],
         sections_found=found,
-        missing_sections=[s for s in PRIORITY_SECTIONS if s not in found and s not in uncertain],
+        missing_sections=missing,
         uncertain_sections=uncertain,
         warnings=warnings,
     )
     return ExtractedFiling(
-        filing=document.filing, source=document.source, blocks=blocks, diagnostics=diagnostics
+        filing=document.filing,
+        source=document.source,
+        extractor_version=EXTRACTOR_VERSION,
+        blocks=blocks,
+        diagnostics=diagnostics,
     )
 
 

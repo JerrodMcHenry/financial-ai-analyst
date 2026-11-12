@@ -1,7 +1,7 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Approved for Milestone 0, Phase B** (owner approval 2026-11-11). Later-milestone sections are design intent, not commitments.
-Last updated: 2026-11-11
+Status: **Milestones 0–1.5 implemented** (owner-approved). Sections marked "later" are design intent, not commitments.
+Last updated: 2026-11-12
 
 ---
 
@@ -9,12 +9,12 @@ Last updated: 2026-11-11
 
 | Item | Finding |
 |---|---|
-| Project directory | `/Users/j/Desktop/enterprise-financial-ai-analyst` was **empty** before this document. |
+| Code | Milestone 0 (FastAPI `/health`, config, SEC client) and Milestone 1 (filing retrieval, extraction, document cache, XBRL Company Facts, M1.5 hardening) are implemented. The project directory was empty when this document was first written. |
 | Git | Originally had no repository of its own (the enclosing repo was the home directory). **Resolved:** the owner initialized a project repository on `main`, remote `https://github.com/JerrodMcHenry/financial-ai-analyst.git`, with an initial commit containing `README.md`. |
 | Python | 3.13.5 is installed (python.org and Anaconda builds). No 3.12 interpreter is installed. |
 | Tooling | `uv` 0.11.14 is installed. Docker is **not** installed (needed in a later milestone). |
 
-Nothing reusable exists, so this is a greenfield design.
+Deferred work is listed in §10. Decisions are recorded in `docs/decisions.md`.
 
 ---
 
@@ -46,7 +46,7 @@ Key separation: **the SEC client is only used by ingestion**, never directly on 
 
 ## 3. Request and data flows
 
-### 3.1 Milestone 0: health check (implemented in Phase B)
+### 3.1 Milestone 0: health check (implemented)
 
 ```
 GET /health
@@ -56,7 +56,7 @@ GET /health
 
 This is a liveness check only. It performs no SEC or database calls, so an outage of a dependency does not make the process look dead. A separate readiness check can be added when a database exists.
 
-### 3.2 Milestone 0: company submissions fetch (implemented in Phase B)
+### 3.2 Milestone 0: company submissions fetch (implemented)
 
 ```
 caller (test or script)
@@ -71,7 +71,7 @@ caller (test or script)
   ← CompanySubmissions (company info + list[FilingRef] + SourceMetadata)
 ```
 
-There is no HTTP endpoint for this in Phase B. The owner decided against a debug route (D-016), so the client stays internal until ingestion exists.
+There is no HTTP endpoint for this. The owner decided against a debug route (D-016), so the client stays internal until ingestion exists.
 
 ### 3.2a Milestone 1.1: filing document retrieval (implemented)
 
@@ -114,8 +114,13 @@ FilingDocument.content (bytes)
   4. classify          → heading if an <h1>–<h6>, or if all its visible text is bold
                          (b/strong or font-weight ≥ 600) and ≤ 300 characters; otherwise paragraph.
   5. sections          → see below
-  ← ExtractedFiling(filing, source, blocks[ContentBlock], diagnostics)
+  ← ExtractedFiling(filing, source, extractor_version, blocks[ContentBlock], diagnostics)
 ```
+
+**Extractor version.**
+- `EXTRACTOR_VERSION` (currently `"1"`) is recorded on every `ExtractedFiling`.
+- Bump it whenever a change could alter block text, kinds, order, indexes or locations for the same input bytes. A `beautifulsoup4` upgrade can do this too.
+- A block is identified only by **source SHA-256 + extractor version + block index**. Any stored chunk or citation identifier must include all three (D-022).
 
 **Tables.** Each `<table>` becomes one block. `rows` holds the cell grid in original row and cell order, and is the authoritative form. A cell with `colspan=n` is followed by n−1 empty-string placeholders so that values stay under their column headers. **These placeholders look exactly like genuinely empty source cells**, so the grid shows where a spanning header starts but not how far it extends. **`rowspan` is not supported yet:** a merged cell appears only in its first row, and later rows can be shorter or misaligned (2 of 60 tables in Apple's 2026 10-K have rows of different lengths). Consumers must not assume tables carry complete merged-cell structure. Rows with no text at all (spacer rows) are dropped. `text` is a convenience rendering: non-empty cells joined by ` | `, one line per row. Tables are never rewritten as prose. Values split across cells (`$` | `178,353`) are kept as separate cells.
 
@@ -129,7 +134,14 @@ FilingDocument.content (bytes)
   - that a heading/paragraph classification matches the author's intent;
   - that every section boundary is found.
 
-**Section detection.** Only heading blocks whose text *starts with* "Item N" (a valid Form 10-K item) or "Part I–IV" are boundaries.
+**Section detection** applies to **10-K and 10-K/A only** (D-022). For any other form, including 10-Q and 10-Q/A:
+- every block is still extracted with the same text, order and locations;
+- `section` is `None` for every block;
+- found, missing and uncertain sections are all empty, and a warning says detection isn't supported for that form.
+
+A 10-Q repeats Items 1–4 in Part I and Part II with different meanings (Part I Item 2 is MD&A), so 10-K numbering would mislabel or misreport it. **Section detection that understands 10-Q Parts I and II is required in M2** before 10-Q narrative is retrieved by section.
+
+For 10-Ks, only heading blocks whose text *starts with* "Item N" (a valid Form 10-K item) or "Part I–IV" are boundaries.
 - A table of contents built as a `<table>` is ignored, and cross-references inside sentences are paragraphs, so they are ignored too.
 - Each boundary starts a region that runs to the next boundary. A "Part" heading ends the previous item.
 - A region is labeled (`section = "Item 1A"`) only if that item's heading occurs exactly once and in the expected order.
@@ -139,6 +151,7 @@ FilingDocument.content (bytes)
 **Diagnostics** (`ExtractionDiagnostics`) report the encoding, the block, paragraph, heading and table counts, sections found, missing and uncertain, and warnings. They describe what the extractor did. They do not show that the extraction is semantically correct.
 
 **Known limitations.**
+- 10-Q and 10-Q/A filings get no section labels yet (see Section detection).
 - Headings that aren't bold or `<h1>`–`<h6>` become paragraphs, so their section is reported missing.
 - Combined headings ("Items 1 and 2.") aren't recognized.
 - Page headers, footers and page numbers remain as paragraphs.
@@ -270,7 +283,7 @@ company_facts.select_fact(facts, taxonomy, concept, unit, period_start, period_e
 - **Policy:** `latest_filed` (the default, which reflects revisions and amendments) or `original` (as first reported) picks a filing date.
 - **Ties:** if the eligible observations filed on that date disagree, whether in one filing or several, `selected` is `None` and `reason` says why. Equally eligible values are never chosen between arbitrarily.
 - **Agreement:** if they agree, the first in sort order is chosen deterministically.
-- **`conflicting_values`** is true whenever the candidates report different values, for example a later comparative that revises the original.
+- **`conflicting_values`** is true when **eligible** observations (10-K/10-Q and their amendments) report different values for the period, for example a later comparative that revises the original. A disagreeing 8-K or `424B2` value doesn't count, but that row still appears in `candidates` (D-022).
 - **`None` with a reason** is also returned when:
   - the concept was never reported;
   - the period isn't reported;
@@ -317,9 +330,9 @@ POST /research {question}
 
 ---
 
-## 4. Proposed directory structure
+## 4. Directory structure
 
-### 4.1 Current structure (after the Phase B simplification)
+### 4.1 Current structure (Milestone 1.5)
 
 ```
 enterprise-financial-ai-analyst/
@@ -407,9 +420,9 @@ Behavior:
 
 ## 6. Source metadata contract
 
-Provenance is captured at three levels. Only level 1 and the filing reference are implemented in Phase B. The rest is defined now so later code has a fixed target.
+Provenance is captured at three levels. Levels 1 and 2 and the extracted-content contract are implemented. Level 3 (chunks) is design only.
 
-### Level 1: every HTTP retrieval (`SourceMetadata`, Phase B)
+### Level 1: every HTTP retrieval (`SourceMetadata`, Milestone 0)
 
 | Field | Type | Notes |
 |---|---|---|
@@ -418,7 +431,7 @@ Provenance is captured at three levels. Only level 1 and the filing reference ar
 | `http_status` | `int` | |
 | `content_sha256` | `str` | Hash of the raw body. Detects upstream changes and supports caching. |
 
-### Filing reference (`FilingRef`, Phase B)
+### Filing reference (`FilingRef`, Milestone 0)
 
 | Field | Type | Notes |
 |---|---|---|
@@ -455,7 +468,7 @@ A model validator enforces two invariants: `sha256(content) == source.content_sh
 
 ### Extracted content (`ExtractedFiling`, `ContentBlock`, Milestone 1.2)
 
-`ExtractedFiling` = `filing: FilingRef`, `source: SourceMetadata` (identifies the exact bytes), `blocks: list[ContentBlock]`, `diagnostics: ExtractionDiagnostics`.
+`ExtractedFiling` = `filing: FilingRef`, `source: SourceMetadata` (identifies the exact bytes), `extractor_version: str`, `blocks: list[ContentBlock]`, `diagnostics: ExtractionDiagnostics`.
 
 | `ContentBlock` field | Type | Notes |
 |---|---|---|
@@ -469,7 +482,7 @@ A model validator enforces two invariants: `sha256(content) == source.content_sh
 
 ### Level 3: narrative passage (`ChunkRecord`, later, design only)
 
-`chunk_id`, `accession_number`, `form`, `document_url`, `section` (e.g. `Item 7`), the source block indexes and their `dom_path`s, `text_sha256`, `fiscal_period` (from the filing), `text`. Chunks will be built from `ContentBlock`s. They will reference block locations rather than character offsets into raw HTML, which the extractor does not provide (D-019).
+`chunk_id`, `accession_number`, `form`, `document_url`, `section` (e.g. `Item 7`), the source block indexes and their `dom_path`s, **`source_sha256` and `extractor_version`** (both required for a block reference to stay meaningful), `text_sha256`, `fiscal_period` (from the filing), `text`. Chunks will be built from `ContentBlock`s. They will reference block locations rather than character offsets into raw HTML, which the extractor does not provide (D-019).
 
 ### Citations (later)
 
@@ -494,7 +507,7 @@ A citation is a **reference to a `fact_id` or `chunk_id` that was returned by a 
 
 ## 8. Dependencies
 
-### Phase B runtime
+### Runtime
 
 | Package | Why |
 |---|---|
@@ -506,7 +519,7 @@ A citation is a **reference to a `fact_id` or `chunk_id` that was returned by a 
 
 | `beautifulsoup4` | Milestone 1.2. A tolerant, well-established HTML tree API, used with Python's built-in `html.parser`, so there are no C extensions. It never runs scripts or fetches resources. It pulls in `soupsieve` (CSS selectors) as a transitive dependency. |
 
-### Phase B development
+### Development
 
 | Package | Why |
 |---|---|
@@ -532,7 +545,7 @@ Environment and lockfile management uses **`uv`** (already installed). It can in
 
 | # | Risk | Mitigation |
 |---|---|---|
-| R1 | ~~The project sat inside a git repo rooted at the home directory.~~ **Resolved** by the owner creating a dedicated project repository. | Phase B adds a `.gitignore` that excludes `.env`, virtual environments and caches. |
+| R1 | ~~The project sat inside a git repo rooted at the home directory.~~ **Resolved** by the owner creating a dedicated project repository. | `.gitignore` excludes `.env`, virtual environments, caches and `data/`. |
 | R2 | SEC blocks clients that exceed fair-access limits or omit a User-Agent. | Required and validated User-Agent, 4 req/s default, config cap at 10, backoff on 429/503, filing-document cache (M1.3). |
 | R3 | Fiscal period semantics. `fy`/`fp` in Company Facts belong to the filing, so a FY2023 10-K also reports FY2021–22 values tagged `fy=2023`. Non-calendar fiscal years (Apple ends in September). 52/53-week years. | Key facts by `(period_start, period_end)` and use `fy`/`fp` only as filing metadata. Store the company's `fiscal_year_end`. Never infer periods from `fy` alone. |
 | R4 | Restatements and duplicates: the same concept and period with different values across filings. | Keep every observation with its accession number. "Latest filed" is an explicit selection policy, and conflicting values are surfaced, never averaged or merged silently. |
@@ -543,19 +556,26 @@ Environment and lockfile management uses **`uv`** (already installed). It can in
 | R9 | Prompt injection through filing text. | Tool output passed as delimited data. System prompt states that retrieved text has no authority. Tool allowlist with validated arguments. No tool has side effects. Red-team cases included in evals. |
 | R10 | Invented citations or hallucinated numbers. | Id-based citations, server-side citation validation, and number matching against tool outputs. |
 | R11 | Float rounding errors in financial values. | `Decimal` for values. Explicit rounding only at presentation. |
-| R12 | Submissions pagination. `filings.recent` holds only the most recent filings (at least one year or 1,000 filings); older ones are in `filings.files`. | Expose `has_more_filings` in M0. Follow pages in M1. |
+| R12 | Submissions pagination. `filings.recent` holds only the most recent filings (at least one year or 1,000 filings); older ones are in `filings.files`. In the Milestone 0 live run, Apple's recent list contained 12 10-Ks, while Company Facts goes back to 2009. | `has_more_filings` is exposed. **Following the extra pages is deferred, not done.** Until then, observations from older filings can't be matched to a `FilingRef` or a document. |
 | R13 | Building evaluation ground truth. | Small hand-verified golden set built from XBRL values with accession numbers. Grows over time. |
 | R14 | Docker is not installed locally. | Needed only for the Postgres and deployment milestones. Install before then. |
 
 ---
 
-## 10. Out of scope for Milestone 0
+## 10. Deferred and out of scope (as of Milestone 1.5)
 
-Database, vector store, LLM, frontend, authentication, background workers, ingestion pipeline, ticker resolution, Company Facts, filing documents, caching, Docker.
+**Explicitly deferred:**
+- Older submission pages (R12).
+- Storing Company Facts responses or observations per accession number. The raw JSON isn't kept, so observations can only be re-checked by downloading again (D-021).
+- XBRL sign conventions. Company Facts gives no debit/credit balance, and `IncreaseDecrease…` concepts are often reported with the opposite sign. This belongs in the calculation design.
+- Section detection for 10-Qs that understands Parts I and II (D-022, required in M2).
+- Resolving fiscal periods and keeping all inputs to one calculation from the same filing. Both must be designed before calculations (M1 integration review B1/B2).
+
+**Out of scope until their milestones:** database and vector store, LLM, frontend, authentication, background workers, ticker resolution, a concept map, calculations, Docker.
 
 ---
 
-## 11. Open questions (all resolved for Phase B)
+## 11. Milestone 0 open questions (historical; all resolved)
 
 - ~~**Q1 Caching.**~~ Resolved: deferred to Milestone 1 (D-013).
 - ~~**Q2 Submissions endpoint.**~~ Resolved: no debug endpoint (D-016).

@@ -170,3 +170,25 @@ Status values: **Proposed** (awaiting owner approval), **Accepted**, **Supersede
 - Using SEC's `frame` for selection: rejected, because frames are calendar-aligned and SEC's choice, not ours.
 - Rejecting the whole response for one bad row: rejected, because it's too fragile for a payload with thousands of rows.
 - Caching: deferred, because the data changes over time. Storage per accession number, whose facts don't change, belongs with the database milestone.
+
+## D-022 Milestone 1.5 hardening: form-aware sections, extractor versioning, eligible-only conflicts
+**Status:** Accepted (owner-directed, 2026-11-12)
+**Decision:**
+1. **Sections for 10-K only.** `filing_extractor.extract_filing` applies section detection only to `10-K` and `10-K/A` (`SECTION_DETECTION_FORMS`).
+   - Other forms, including 10-Q and 10-Q/A, keep every block and location.
+   - They get `section=None` everywhere and empty found, missing and uncertain lists.
+   - They get an explicit warning.
+   - Section detection for 10-Qs that understands Parts I and II is required in M2.
+2. **Extractor version.** `EXTRACTOR_VERSION = "1"` is recorded on every `ExtractedFiling` as `extractor_version`.
+   - Bump it when a change could alter blocks for the same bytes.
+   - Stored chunk or citation identifiers must include the extractor version and the source content SHA-256.
+3. **Eligible-only conflicts.** `company_facts.select_fact` computes `conflicting_values` over eligible observations only (10-K, 10-K/A, 10-Q, 10-Q/A).
+   - All observations for the exact period remain in `candidates`.
+   - Selection and tie handling are unchanged.
+
+**Why:**
+1. A 10-Q repeats Item numbers across Parts with different meanings. Applying 10-K rules produced misleading "missing Item 7/8" diagnostics and left MD&A unassigned.
+2. Block text and indexes for the same bytes can change between extractor versions, as the M1.2 bullet fix did. Without a version, saved citations could quietly point to different text.
+3. A disagreeing press-release 8-K value made 10-K values look "revised" when they weren't.
+
+**Deferred:** older submission pages (R12), storing Company Facts per accession, XBRL sign conventions.

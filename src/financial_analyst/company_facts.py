@@ -42,8 +42,11 @@ class FactSelection(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     selected: FactObservation | None  # None when not reported, ineligible, or ambiguous
-    candidates: list[FactObservation]  # every observation for the exact period, sorted
-    conflicting_values: bool  # candidates report different values (e.g. a revision)
+    candidates: list[FactObservation]  # every observation for the exact period, any form, sorted
+    # True when observations from ELIGIBLE forms (10-K/10-Q and amendments) report different
+    # values for this period, e.g. a later 10-K revising a comparative. Disagreement from
+    # ineligible forms (8-K, 424B2, ...) is not counted; those rows stay visible in candidates.
+    conflicting_values: bool
     reason: str
     source: SourceMetadata  # the Company Facts response the observations came from
 
@@ -106,7 +109,8 @@ def select_fact(
         for obs in find_observations(facts, taxonomy, concept, unit)
         if obs.period_start == period_start and obs.period_end == period_end
     ]
-    conflicting = len({obs.value for obs in candidates}) > 1
+    eligible = [obs for obs in candidates if obs.form in ELIGIBLE_FORMS]
+    conflicting = len({obs.value for obs in eligible}) > 1
 
     def result(selected: FactObservation | None, reason: str) -> FactSelection:
         return FactSelection(
@@ -123,7 +127,6 @@ def select_fact(
             return result(None, f"{taxonomy}:{concept} is not reported by this company")
         return result(None, f"{name} is not reported for this exact period")
 
-    eligible = [obs for obs in candidates if obs.form in ELIGIBLE_FORMS]
     if not eligible:
         forms = sorted({obs.form for obs in candidates})
         return result(None, f"{name} is reported for this period only in {forms}")
@@ -143,7 +146,7 @@ def select_fact(
     selected = chosen[0]  # all agree; candidates are sorted, so this is deterministic
     reason = f"{policy}: filed {selected.filed} in {selected.form} {selected.accession_number}"
     if conflicting:
-        reason += "; other filings report a different value for this period"
+        reason += "; other eligible filings report a different value for this period"
     return result(selected, reason)
 
 

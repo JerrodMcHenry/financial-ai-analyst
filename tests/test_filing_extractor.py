@@ -6,17 +6,17 @@ from pathlib import Path
 
 import pytest
 
-from financial_analyst.filing_extractor import extract_filing
+from financial_analyst.filing_extractor import EXTRACTOR_VERSION, extract_filing
 from financial_analyst.sec_models import FilingDocument, FilingRef, SourceMetadata
 
 SAMPLE = (Path(__file__).parent / "fixtures" / "filing_sample.htm").read_bytes()
 
 
-def make_document(content: bytes) -> FilingDocument:
+def make_document(content: bytes, form: str = "10-K") -> FilingDocument:
     filing = FilingRef(
         cik="0000320193",
         accession_number="0000320193-26-000026",
-        form="10-K",
+        form=form,
         filing_date="2026-11-03",
         report_date="2026-09-26",
         acceptance_datetime=None,
@@ -190,3 +190,35 @@ def test_bullets_separated_only_by_css_get_a_space():
     result = extract_filing(make_document(html))
 
     assert [b.text for b in result.blocks] == ["• iPhone", "◦ iPad", "▪ Mac", "• Watch"]
+
+
+@pytest.mark.parametrize("form", ["10-Q", "10-Q/A"])
+def test_10q_keeps_every_block_but_assigns_no_10k_sections(sample, form):
+    document = make_document(SAMPLE, form=form)
+    result = extract_filing(document)
+
+    def without_section(blocks):
+        return [b.model_dump(exclude={"section"}) for b in blocks]
+
+    # Same blocks, text, order and locations as the 10-K extraction of the same bytes.
+    assert without_section(result.blocks) == without_section(sample.blocks)
+    assert all(b.section is None for b in result.blocks)
+    d = result.diagnostics
+    assert (d.sections_found, d.missing_sections, d.uncertain_sections) == ([], [], [])
+    assert d.warnings == [
+        f"Section detection is not yet supported for {form} filings; no sections assigned"
+    ]
+    assert (result.filing, result.source) == (document.filing, document.source)
+
+
+def test_10k_amendment_keeps_10k_section_detection(sample):
+    result = extract_filing(make_document(SAMPLE, form="10-K/A"))
+
+    assert [b.section for b in result.blocks] == [b.section for b in sample.blocks]
+    assert result.diagnostics.sections_found == ["Item 1", "Item 1A", "Item 7"]
+
+
+def test_extractor_version_is_recorded_and_stable(sample):
+    assert EXTRACTOR_VERSION == "1"
+    assert sample.extractor_version == EXTRACTOR_VERSION
+    assert extract_filing(make_document(SAMPLE)).extractor_version == sample.extractor_version
