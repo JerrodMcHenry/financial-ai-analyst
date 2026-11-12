@@ -110,3 +110,19 @@ Status values: **Proposed** (awaiting owner approval), **Accepted**, **Supersede
 **Why:** It reuses pacing, retries and error mapping unchanged. `primary_document` comes from EDGAR's data and is not validated by `FilingRef` (other forms legitimately contain paths such as `xslF345X05/form4.xml`), so the strict check belongs at the point where we build a request URL.
 **Not claimed:** the HTML checks show the body is plausibly a filing, not which filing it is. Identity comes from trusted submissions metadata plus the derived archive path.
 **Alternative:** Validate `primary_document` in `FilingRef`. Rejected because it would make submissions parsing fail for other form types.
+
+## D-019 Deterministic filing extraction with Beautiful Soup and honest locations
+**Status:** Accepted (owner approval, 2026-11-12; verified live against Apple's 2026 10-K: 23/23 items found, no warnings)
+**Decision:** One new module, `filing_extractor.py`, with `extract_filing(FilingDocument) -> ExtractedFiling`. It uses `beautifulsoup4` with Python's built-in `html.parser` (the owner suggested evaluating Beautiful Soup).
+- **Decoding:** UTF-8, with a windows-1252 fallback that is reported in a warning.
+- **Skipped:** `ix:header`, `display:none`, script and style. Other inline XBRL tags are transparent.
+- **Blocks:** each block-level element or table becomes a heading, paragraph or table block.
+- **Tables:** kept as a cell grid with colspan padding.
+- **Locations:** a DOM path plus the element's own `id`, tied to the document's SHA-256.
+- **Sections:** only unique, in-order "Item N" headings outside tables count. Anything ambiguous is left unassigned and reported as uncertain.
+**Why:** A tree parser is far less error-prone than regexes over HTML, and `html.parser` avoids C dependencies while handling filings of this size. DOM paths are the most precise location HTML honestly provides. Page numbers and character offsets would claim precision we don't have. Leaving uncertain sections unassigned avoids silently putting content in the wrong section.
+**Alternatives:**
+- `lxml`: faster, but a C extension that isn't needed yet.
+- `html5lib`: browser-exact, but slow.
+- Character offsets into the HTML: brittle, and misleading after tags are removed.
+- Using the table of contents to find sections: its links differ by filer, and it can disagree with the body.

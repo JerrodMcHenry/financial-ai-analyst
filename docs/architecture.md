@@ -95,6 +95,58 @@ caller holds a FilingRef from get_submissions
 
 **Identity.** The document is tied to its filing because the URL is built only from trusted submissions metadata and must match the expected archive path. The HTML checks in step 3 only make it *plausible* that the body is a filing rather than an error page. They do not prove which filing it is.
 
+### 3.2b Milestone 1.2: filing content extraction (implemented)
+
+`extract_filing(document: FilingDocument) -> ExtractedFiling` in `filing_extractor.py`. It is pure and offline: no network, and it never modifies the input.
+
+```
+FilingDocument.content (bytes)
+  1. decode            → UTF-8 (covers the ASCII SEC usually declares); if invalid,
+                         windows-1252 with a warning. The encoding used is recorded.
+  2. parse             → BeautifulSoup + Python's built-in html.parser. Builds a tree only:
+                         no scripts run, no external resources load, malformed markup recovered.
+  3. walk in order     → skip <head>, script/style, ix:header (hidden XBRL facts) and any
+                         element with display:none or the hidden attribute.
+                         Block elements (div, p, li, h1–h6, …) start a new block. Inline
+                         elements (span, b, a, ix:nonNumeric, ix:nonFraction, …) are transparent,
+                         so values tagged with XBRL stay in their sentence.
+                         <table> → one table block. Whitespace (incl. &nbsp;) → single spaces.
+  4. classify          → heading if an <h1>–<h6>, or if all its visible text is bold
+                         (b/strong or font-weight ≥ 600) and ≤ 300 characters; otherwise paragraph.
+  5. sections          → see below
+  ← ExtractedFiling(filing, source, blocks[ContentBlock], diagnostics)
+```
+
+**Tables.** Each `<table>` becomes one block. `rows` holds the cell grid in original row and cell order, and is the authoritative form. A cell with `colspan=n` is followed by n−1 empty-string placeholders so that values stay under their column headers. **These placeholders look exactly like genuinely empty source cells**, so the grid shows where a spanning header starts but not how far it extends. **`rowspan` is not supported yet:** a merged cell appears only in its first row, and later rows can be shorter or misaligned (2 of 60 tables in Apple's 2026 10-K have rows of different lengths). Consumers must not assume tables carry complete merged-cell structure. Rows with no text at all (spacer rows) are dropped. `text` is a convenience rendering: non-empty cells joined by ` | `, one line per row. Tables are never rewritten as prose. Values split across cells (`$` | `178,353`) are kept as separate cells.
+
+**Source locations.** Each block has a `dom_path` such as `/html[1]/body[1]/div[5]`: the element's position in the html.parser tree, counting same-name siblings from 1. It also has `element_id`, the element's own `id` attribute, when present. Hidden elements are skipped but still counted, so recorded paths match the original tree. A path is only meaningful for the exact bytes identified by `ExtractedFiling.source.content_sha256`. A browser's DOM can differ for malformed markup.
+
+**Citation guarantees.**
+- **Guaranteed:** each block's text comes from the element at its `dom_path` in the document with that SHA-256, and blocks appear in document order. Re-running extraction on the same bytes gives identical blocks.
+- **Not guaranteed:**
+  - page numbers (HTML has none);
+  - character offsets into the raw HTML;
+  - that a heading/paragraph classification matches the author's intent;
+  - that every section boundary is found.
+
+**Section detection.** Only heading blocks whose text *starts with* "Item N" (a valid Form 10-K item) or "Part I–IV" are boundaries.
+- A table of contents built as a `<table>` is ignored, and cross-references inside sentences are paragraphs, so they are ignored too.
+- Each boundary starts a region that runs to the next boundary. A "Part" heading ends the previous item.
+- A region is labeled (`section = "Item 1A"`) only if that item's heading occurs exactly once and in the expected order.
+- Duplicate or out-of-order headings leave their regions as `None`, reported in `uncertain_sections` and `warnings`. That content is never given to a neighboring section.
+- Priority items (1, 1A, 7, 8) with no heading are listed in `missing_sections`.
+
+**Diagnostics** (`ExtractionDiagnostics`) report the encoding, the block, paragraph, heading and table counts, sections found, missing and uncertain, and warnings. They describe what the extractor did. They do not show that the extraction is semantically correct.
+
+**Known limitations.**
+- Headings that aren't bold or `<h1>`–`<h6>` become paragraphs, so their section is reported missing.
+- Combined headings ("Items 1 and 2.") aren't recognized.
+- Page headers, footers and page numbers remain as paragraphs.
+- Tables used for layout (bullets, cover page) are still table blocks.
+- `rowspan` isn't expanded, and colspan placeholders look the same as genuinely empty cells (see Tables above).
+- Nested tables appear as text inside a cell.
+- Extremely deep, malformed nesting could exceed Python's recursion limit.
+
 ### 3.3 Later milestone: ingestion
 
 ```
@@ -144,13 +196,16 @@ enterprise-financial-ai-analyst/
 │       ├── __init__.py
 │       ├── main.py             # FastAPI app + GET /health
 │       ├── config.py           # Settings (pydantic-settings)
-│       ├── sec_client.py       # SecClient: pacing, retries, error mapping, get_submissions
-│       └── sec_models.py       # SourceMetadata, FilingRef, CompanySubmissions
+│       ├── sec_client.py       # SecClient: submissions + filing documents (pacing, retries)
+│       ├── sec_models.py       # SourceMetadata, FilingRef, CompanySubmissions, FilingDocument
+│       └── filing_extractor.py # extract_filing: HTML → ordered blocks, sections, diagnostics
 └── tests/
     ├── conftest.py             # shared settings fixture
     ├── fixtures/
-    │   └── submissions_sample.json   # trimmed, realistic EDGAR payload
+    │   ├── submissions_sample.json   # trimmed EDGAR submissions payload
+    │   └── filing_sample.htm         # trimmed inline-XBRL 10-K-style HTML
     ├── test_config.py
+    ├── test_filing_extractor.py
     ├── test_health.py
     └── test_sec_client.py
 ```
@@ -249,9 +304,23 @@ A model validator enforces two invariants: `sha256(content) == source.content_sh
 
 `fact_id`, `cik`, `taxonomy` (`us-gaap`/`dei`/`ifrs-full`), `concept`, `unit` (`USD`, `shares`, `USD/shares`, `pure`), `value: Decimal`, `period_start: date | None` (None means an instant fact), `period_end: date`, `fy`, `fp`, `form`, `filed`, `accession_number`, `frame | None`, `source_url`.
 
+### Extracted content (`ExtractedFiling`, `ContentBlock`, Milestone 1.2)
+
+`ExtractedFiling` = `filing: FilingRef`, `source: SourceMetadata` (identifies the exact bytes), `blocks: list[ContentBlock]`, `diagnostics: ExtractionDiagnostics`.
+
+| `ContentBlock` field | Type | Notes |
+|---|---|---|
+| `index` | `int` | 0-based document order |
+| `kind` | `"heading" \| "paragraph" \| "table"` | |
+| `text` | `str` | Normalized text. For tables: non-empty cells joined by ` \| `, one line per row. |
+| `rows` | `list[list[str]] \| None` | Tables only. Authoritative cell grid. Colspan placeholders are `""`, the same as empty source cells. Rowspan isn't expanded. |
+| `section` | `str \| None` | e.g. `"Item 1A"`. `None` when unknown or uncertain. |
+| `dom_path` | `str` | Element position in the parsed tree |
+| `element_id` | `str \| None` | The element's own `id` attribute |
+
 ### Level 3: narrative passage (`ChunkRecord`, later, design only)
 
-`chunk_id`, `accession_number`, `form`, `document_url`, `section` (e.g. `Item 7`), `char_start`, `char_end`, `text_sha256`, `fiscal_period` (from the filing), `text`.
+`chunk_id`, `accession_number`, `form`, `document_url`, `section` (e.g. `Item 7`), the source block indexes and their `dom_path`s, `text_sha256`, `fiscal_period` (from the filing), `text`. Chunks will be built from `ContentBlock`s. They will reference block locations rather than character offsets into raw HTML, which the extractor does not provide (D-019).
 
 ### Citations (later)
 
@@ -286,6 +355,8 @@ A citation is a **reference to a `fact_id` or `chunk_id` that was returned by a 
 | `pydantic-settings` | Typed, validated settings from environment and `.env`. Since Pydantic v2 this is a separate package. Avoids hand-written env parsing. |
 | `httpx` | HTTP client with explicit timeouts, connection pooling and **built-in `MockTransport`** for network-free tests. FastAPI's `TestClient` also uses it. |
 
+| `beautifulsoup4` | Milestone 1.2. A tolerant, well-established HTML tree API, used with Python's built-in `html.parser`, so there are no C extensions. It never runs scripts or fetches resources. It pulls in `soupsieve` (CSS selectors) as a transitive dependency. |
+
 ### Phase B development
 
 | Package | Why |
@@ -298,6 +369,7 @@ A citation is a **reference to a `fact_id` or `chunk_id` that was returned by a 
 | Package | Reason |
 |---|---|
 | `respx` / `responses` | `httpx.MockTransport` covers the mocking needs. |
+| `lxml` / `html5lib` | Faster or more browser-faithful parsing isn't needed for ~2 MB filings. Both add a C extension or a larger dependency. Revisit if parsing becomes a bottleneck. |
 | `tenacity` / `backoff` | The retry policy is about 25 readable lines and must be explicit for review. |
 | `requests` / `aiohttp` | `httpx` covers both needs. |
 | `python-dotenv` | `pydantic-settings` reads `.env` natively. |

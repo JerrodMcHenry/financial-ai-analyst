@@ -62,9 +62,25 @@ with SecClient(Settings()) as sec:
 **Discovery vs retrieval.** `get_submissions` *discovers* filings and returns trusted metadata:
 accession number, form and primary document name. `get_filing_document` *retrieves* one
 filing's primary document from the EDGAR archive URL derived from that metadata. It never
-searches or crawls. `document.content` holds the exact bytes SEC returned; parsing comes in a
-later milestone.
+searches or crawls. `document.content` holds the exact bytes SEC returned (after HTTP
+decompression). Turning them into text is a separate, offline step (below).
 
 The client paces requests (default 4/s, never more than SEC's 10/s), uses explicit timeouts,
 and retries 429/5xx/timeouts at most 3 times with exponential backoff (constants at the top
 of `sec_client.py`).
+
+## Extracting filing content
+
+```python
+from financial_analyst.filing_extractor import extract_filing
+
+extracted = extract_filing(document)  # offline; does not modify `document`
+print(extracted.diagnostics.sections_found, extracted.diagnostics.warnings)
+for block in extracted.blocks[:10]:
+    print(block.index, block.kind, block.section, block.dom_path, block.text[:80])
+```
+
+Each block is a heading, paragraph or table, in document order. Tables keep their cell grid in
+`block.rows`. `dom_path` plus the document's SHA-256 says exactly where each block came from.
+Form 10-K sections are assigned only when their headings are unambiguous. See
+[docs/architecture.md](docs/architecture.md) §3.2b for the guarantees and limitations.
