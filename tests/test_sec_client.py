@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from financial_analyst import sec_client
 from financial_analyst.sec_client import (
@@ -16,6 +17,7 @@ from financial_analyst.sec_client import (
     SecResponseError,
     normalize_cik,
 )
+from financial_analyst.sec_models import FilingDocument, FilingRef
 
 FIXTURE = Path(__file__).parent / "fixtures" / "submissions_sample.json"
 APPLE_URL = "https://data.sec.gov/submissions/CIK0000320193.json"
@@ -189,3 +191,114 @@ def test_requests_are_paced(settings, sleeps):
     min_interval = 1 / settings.sec_max_requests_per_second
     assert len(sleeps) == 1
     assert 0 < sleeps[0] <= min_interval
+
+
+# --- Filing document retrieval -------------------------------------------------------
+
+DOCUMENT_URL = "https://www.sec.gov/Archives/edgar/data/320193/000032019326000026/aapl-20260926.htm"
+# Starts like a real inline-XBRL filing; \xa0 is a non-UTF-8 byte that must survive untouched.
+FILING_HTML = b"<?xml version='1.0' encoding='ASCII'?>\n<html><body>Annual report\xa0</body></html>"
+HTML = {"Content-Type": "text/html"}
+
+
+def make_filing(**overrides):
+    fields = {
+        "cik": "0000320193",
+        "accession_number": "0000320193-26-000026",
+        "form": "10-K",
+        "filing_date": "2026-11-03",
+        "report_date": "2026-09-26",
+        "acceptance_datetime": None,
+        "primary_document": "aapl-20260926.htm",
+        "is_xbrl": True,
+        "is_inline_xbrl": True,
+    }
+    return FilingRef(**(fields | overrides))
+
+
+def test_get_filing_document_keeps_exact_bytes_and_provenance(settings):
+    filing = make_filing()
+    client, requests = make_client(
+        settings, [httpx.Response(200, content=FILING_HTML, headers=HTML)]
+    )
+
+    document = client.get_filing_document(filing)
+
+    assert str(requests[0].url) == DOCUMENT_URL
+    assert document.content == FILING_HTML
+    assert document.filing == filing
+    assert str(document.source.source_url) == DOCUMENT_URL
+    assert document.source.http_status == 200
+    assert document.source.content_sha256 == hashlib.sha256(FILING_HTML).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"primary_document": None},
+        {"primary_document": "../../evil.htm"},
+        {"primary_document": "aapl.htm?redirect=elsewhere"},
+        {"primary_document": "aapl-20260926.txt"},
+        {"form": "4", "primary_document": "xslF345X05/form4.xml"},
+    ],
+    ids=["missing", "path-traversal", "query-string", "not-html", "unsupported-form"],
+)
+def test_invalid_filing_is_rejected_before_any_request(settings, overrides):
+    client, requests = make_client(settings, [])
+
+    with pytest.raises(ValueError):
+        client.get_filing_document(make_filing(**overrides))
+    assert requests == []
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(200, content=b"", headers=HTML),
+        httpx.Response(
+            200, content=b'{"error": "x"}', headers={"Content-Type": "application/json"}
+        ),
+        httpx.Response(200, content=b"Annual report as plain text", headers=HTML),
+        httpx.Response(
+            200,
+            content=b"<html><body><h1>Request Rate Threshold Exceeded</h1></body></html>",
+            headers=HTML,
+        ),
+    ],
+    ids=["empty", "wrong-content-type", "not-html", "sec-error-page"],
+)
+def test_implausible_document_response_is_rejected(settings, response):
+    client, _ = make_client(settings, [response])
+
+    with pytest.raises(SecResponseError):
+        client.get_filing_document(make_filing())
+
+
+def test_document_retrieval_reuses_retries(settings):
+    client, requests = make_client(
+        settings,
+        [httpx.Response(503), httpx.Response(200, content=FILING_HTML, headers=HTML)],
+    )
+
+    document = client.get_filing_document(make_filing())
+
+    assert document.content == FILING_HTML
+    assert len(requests) == 2
+
+
+def test_document_redirect_is_not_followed(settings):
+    redirect = httpx.Response(301, headers={"Location": "https://example.com/aapl.htm"})
+    client, requests = make_client(settings, [redirect])
+
+    with pytest.raises(SecError) as excinfo:
+        client.get_filing_document(make_filing())
+    assert excinfo.value.status_code == 301
+    assert len(requests) == 1
+
+
+def test_filing_document_rejects_content_that_does_not_match_its_hash(settings):
+    client, _ = make_client(settings, [httpx.Response(200, content=FILING_HTML, headers=HTML)])
+    document = client.get_filing_document(make_filing())
+
+    with pytest.raises(ValidationError):
+        FilingDocument(filing=document.filing, content=b"tampered", source=document.source)

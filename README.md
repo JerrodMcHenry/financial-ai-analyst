@@ -49,10 +49,21 @@ from financial_analyst.config import Settings
 from financial_analyst.sec_client import SecClient
 
 with SecClient(Settings()) as sec:
+    # Discovery: which filings exist (metadata only)
     submissions = sec.get_submissions("320193")  # Apple Inc.
-    for filing in submissions.recent_filings[:5]:
-        print(filing.form, filing.filing_date, filing.accession_number, filing.primary_document_url)
+    ten_k = next(f for f in submissions.recent_filings if f.form == "10-K")
+    print(ten_k.accession_number, ten_k.primary_document_url)
+
+    # Retrieval: download that filing's primary HTML document (10-K/10-Q and amendments only)
+    document = sec.get_filing_document(ten_k)
+    print(len(document.content), document.source.content_sha256)
 ```
+
+**Discovery vs retrieval.** `get_submissions` *discovers* filings and returns trusted metadata:
+accession number, form and primary document name. `get_filing_document` *retrieves* one
+filing's primary document from the EDGAR archive URL derived from that metadata. It never
+searches or crawls. `document.content` holds the exact bytes SEC returned; parsing comes in a
+later milestone.
 
 The client paces requests (default 4/s, never more than SEC's 10/s), uses explicit timeouts,
 and retries 429/5xx/timeouts at most 3 times with exponential backoff (constants at the top

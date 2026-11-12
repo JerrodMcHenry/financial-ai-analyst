@@ -66,12 +66,34 @@ caller (test or script)
       3. _pace()                         → enforce min interval between requests
       4. httpx GET (User-Agent, timeouts)
       5. retry loop on 429 / 5xx / timeout (bounded, exponential backoff + jitter, honors Retry-After)
-      6. map final status → typed exception (not found / rate limited / unavailable)
+      6. map final status → SecError (SecNotFoundError for 404; status_code kept)
       7. parse JSON → Pydantic validation
   ← CompanySubmissions (company info + list[FilingRef] + SourceMetadata)
 ```
 
 There is no HTTP endpoint for this in Phase B. The owner decided against a debug route (D-016), so the client stays internal until ingestion exists.
+
+### 3.2a Milestone 1.1: filing document retrieval (implemented)
+
+**Discovery vs retrieval.** *Discovery* (`get_submissions`) asks EDGAR which filings a company has and returns trusted metadata: accession number, form, dates and primary document name. *Retrieval* (`get_filing_document`) downloads one filing's primary HTML document. Retrieval never searches or crawls. It takes a `FilingRef` produced by discovery and fetches exactly the archive URL derived from it.
+
+```
+caller holds a FilingRef from get_submissions
+  → SecClient.get_filing_document(filing)
+      1. _filing_document_url(filing)    → form must be 10-K/10-Q (or /A); primary document required;
+                                           URL must fully match https://www.sec.gov/Archives/edgar/data/
+                                           <cik>/<18-digit accession>/<plain filename>.htm(l)
+                                           (else ValueError, before any request)
+      2. _get(url)                       → same pacing, timeouts, retries and error mapping as above;
+                                           redirects are not followed (3xx → SecError)
+      3. _check_html_filing(response)    → Content-Type text/html, non-empty, "<html" near the start,
+                                           no SEC block-page phrases (else SecResponseError)
+      4. _source_metadata(url, response) → URL, UTC time, status, SHA-256 of the exact bytes
+  ← FilingDocument(filing, content=<exact bytes>, source)
+       model validator re-checks: hash matches content; source URL == filing's document URL
+```
+
+**Identity.** The document is tied to its filing because the URL is built only from trusted submissions metadata and must match the expected archive path. The HTML checks in step 3 only make it *plausible* that the body is a filing rather than an error page. They do not prove which filing it is.
 
 ### 3.3 Later milestone: ingestion
 
@@ -152,10 +174,10 @@ class SecClient:
         # Tests replace time.sleep with pytest's monkeypatch, so nothing really waits.
 
     def get_submissions(self, cik: str | int) -> CompanySubmissions: ...
+    def get_filing_document(self, filing: FilingRef) -> FilingDocument: ...   # Milestone 1.1
 
-    # Added in Milestone 1 (same private plumbing, no new abstractions):
+    # Planned (same private plumbing, no new abstractions):
     # def get_company_facts(self, cik: str | int) -> CompanyFacts: ...
-    # def get_filing_document(self, filing: FilingRef) -> FilingDocument: ...
 
     def close(self) -> None: ...
     def __enter__(self) / __exit__(...)  # context-manager support
@@ -173,8 +195,9 @@ Behavior:
 | Pacing | Minimum interval between requests, enforced with a `threading.Lock` and a monotonic clock. Default **4 req/s** (`SEC_MAX_REQUESTS_PER_SECOND=4`). Config validation **rejects values above 10**, which is SEC's published limit. |
 | Timeouts | Explicit: connect 5s, read 20s, write/pool 10s. Named constants in `sec_client.py`, not env vars. |
 | Retries | Bounded: `MAX_RETRIES = 3` (constant). Retry on 429, 500, 502, 503, 504, timeouts and connection errors. Exponential backoff with jitter (`BACKOFF_BASE_SECONDS = 1`), capped at `BACKOFF_MAX_SECONDS = 30`. `Retry-After` is honored. If it asks for more than the cap, the client stops instead of retrying early. No retry on other 4xx. |
-| Errors | Three classes. `SecError` covers any failure and carries `status_code` (None for timeouts and connection errors). Two subclasses: `SecNotFoundError` (404) and `SecResponseError` (invalid JSON or schema mismatch). Callers never see raw `httpx` exceptions. |
-| Input validation | CIK must be 1–10 digits, then zero-padded to 10. Anything else raises `ValueError` before any network call. |
+| Errors | Three classes. `SecError` covers any failure and carries `status_code` (None for timeouts and connection errors). Two subclasses: `SecNotFoundError` (404) and `SecResponseError` (invalid JSON, schema mismatch, or a 200 response that is not plausibly a filing document). Callers never see raw `httpx` exceptions. |
+| Input validation | CIK must be 1–10 digits, then zero-padded to 10. Document requests must be a 10-K/10-Q-family filing whose URL fully matches the EDGAR archive pattern. Anything else raises `ValueError` before any network call. |
+| Redirects | Not followed (httpx default). A 3xx response raises `SecError`, so a request can never be steered to another host. |
 | Caching | Deferred to Milestone 1 (D-013). The `_get_json` seam is where a cache will be added. |
 
 **Why synchronous:** SEC access is rate-limited batch ingestion, so concurrency gains little under a global 4 req/s cap. Sync code is simpler to read, test and debug. If a FastAPI route ever calls it, a plain `def` route runs in FastAPI's threadpool, which the lock handles. Revisit only if profiling shows a need. (Decision D-004.)
@@ -210,7 +233,17 @@ Provenance is captured at three levels. Only level 1 and the filing reference ar
 
 `CompanySubmissions` = `cik`, `name`, `tickers`, `exchanges`, `sic`, `sic_description`, `fiscal_year_end` (`"MMDD"`), `recent_filings: list[FilingRef]`, `has_more_filings: bool`, `source: SourceMetadata`.
 
-EDGAR returns `filings.recent` as parallel arrays (one array per field). The parser zips them into rows and **raises `SecResponseError` if the array lengths differ**, rather than silently misaligning fields.
+EDGAR returns `filings.recent` as parallel arrays (one array per field). The parser reads them row by row with explicit indexes and **raises `SecResponseError` if the array lengths differ**, rather than silently misaligning fields.
+
+### Filing document (`FilingDocument`, Milestone 1.1)
+
+| Field | Type | Notes |
+|---|---|---|
+| `filing` | `FilingRef` | Filing identity (CIK, accession number, form, primary document URL). Not copied into separate fields. |
+| `content` | `bytes` | Response body exactly as returned by httpx **after HTTP decompression** (SEC serves gzip), not the compressed bytes sent over the network. The SHA-256 covers these decompressed bytes. Not decoded to text or parsed. Hidden from `repr`. |
+| `source` | `SourceMetadata` | Retrieval provenance for this response |
+
+A model validator enforces two invariants: `sha256(content) == source.content_sha256`, and `source.source_url == filing.primary_document_url`.
 
 ### Level 2: structured fact (`FactRecord`, Milestone 1, design only)
 

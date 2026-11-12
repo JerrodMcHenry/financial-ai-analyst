@@ -1,8 +1,17 @@
 """Typed contracts for data retrieved from SEC EDGAR, including provenance."""
 
+import hashlib
 from datetime import date, datetime
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, HttpUrl, computed_field
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    computed_field,
+    model_validator,
+)
 
 ARCHIVES_BASE_URL = "https://www.sec.gov/Archives/edgar/data"
 
@@ -59,3 +68,29 @@ class CompanySubmissions(BaseModel):
     # EDGAR pages older filings into separate files; fetching them is Milestone 1.
     has_more_filings: bool
     source: SourceMetadata
+
+
+class FilingDocument(BaseModel):
+    """A filing's primary document, exactly as SEC served it.
+
+    The link to the filing comes from trusted submissions metadata and the archive URL
+    derived from it; the HTML content itself does not prove which filing it is.
+
+    `content` is the response body after httpx undoes HTTP compression (SEC serves gzip),
+    not the compressed bytes sent over the network. `source.content_sha256` hashes these
+    same decompressed bytes. They are not decoded to text or parsed.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    filing: FilingRef
+    content: bytes = Field(repr=False)
+    source: SourceMetadata
+
+    @model_validator(mode="after")
+    def _check_provenance(self) -> "FilingDocument":
+        if str(self.source.source_url) != self.filing.primary_document_url:
+            raise ValueError("source URL is not this filing's primary document URL")
+        if hashlib.sha256(self.content).hexdigest() != self.source.content_sha256:
+            raise ValueError("content does not match its SHA-256 hash")
+        return self

@@ -17,7 +17,12 @@ import httpx
 from pydantic import ValidationError
 
 from financial_analyst.config import Settings
-from financial_analyst.sec_models import CompanySubmissions, FilingRef, SourceMetadata
+from financial_analyst.sec_models import (
+    CompanySubmissions,
+    FilingDocument,
+    FilingRef,
+    SourceMetadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,16 @@ MAX_RETRIES = 3
 BACKOFF_BASE_SECONDS = 1.0
 BACKOFF_MAX_SECONDS = 30.0
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
+# Document retrieval is limited to the periodic reports this product analyzes.
+DOCUMENT_FORMS = frozenset({"10-K", "10-K/A", "10-Q", "10-Q/A"})
+# The only URL shape get_filing_document will request: https, www.sec.gov, a numeric CIK,
+# an 18-digit accession folder, and a plain .htm/.html filename (no "/", "..", "?" or "#").
+_ARCHIVE_URL_PATTERN = re.compile(
+    r"https://www\.sec\.gov/Archives/edgar/data/[0-9]{1,10}/[0-9]{18}/[A-Za-z0-9][A-Za-z0-9._-]*\.html?"
+)
+# Phrases from SEC's block pages, which can be served as HTML instead of a filing.
+_SEC_ERROR_PAGE_MARKERS = (b"Request Rate Threshold Exceeded", b"Undeclared Automated Tool")
 
 _CIK_PATTERN = re.compile(r"[0-9]{1,10}")
 
@@ -90,6 +105,15 @@ class SecClient:
         payload, source = self._get_json(SUBMISSIONS_URL.format(cik=cik))
         return _parse_submissions(payload, cik, source)
 
+    def get_filing_document(self, filing: FilingRef) -> FilingDocument:
+        """Download a filing's primary HTML document, keeping the exact response bytes."""
+        url = _filing_document_url(filing)
+        response = self._get(url)
+        _check_html_filing(response, url)
+        return FilingDocument(
+            filing=filing, content=response.content, source=_source_metadata(url, response)
+        )
+
     def _get_json(self, url: str) -> tuple[dict[str, Any], SourceMetadata]:
         response = self._get(url)
         try:
@@ -98,13 +122,7 @@ class SecClient:
             raise SecResponseError(f"Invalid JSON from {url}") from exc
         if not isinstance(payload, dict):
             raise SecResponseError(f"Expected a JSON object from {url}")
-        source = SourceMetadata(
-            source_url=url,
-            retrieved_at=datetime.now(UTC),
-            http_status=response.status_code,
-            content_sha256=hashlib.sha256(response.content).hexdigest(),
-        )
-        return payload, source
+        return payload, _source_metadata(url, response)
 
     def _get(self, url: str) -> httpx.Response:
         """GET with pacing and bounded retries; raises SecError on failure."""
@@ -148,6 +166,44 @@ class SecClient:
             if wait > 0:
                 time.sleep(wait)
             self._next_request_at = max(now, self._next_request_at) + self._min_interval
+
+
+def _source_metadata(url: str, response: httpx.Response) -> SourceMetadata:
+    return SourceMetadata(
+        source_url=url,
+        retrieved_at=datetime.now(UTC),
+        http_status=response.status_code,
+        content_sha256=hashlib.sha256(response.content).hexdigest(),
+    )
+
+
+def _filing_document_url(filing: FilingRef) -> str:
+    """Return the filing's archive URL, or raise ValueError before any request is sent."""
+    if filing.form not in DOCUMENT_FORMS:
+        raise ValueError(
+            f"Document retrieval supports {sorted(DOCUMENT_FORMS)}, got {filing.form!r}"
+        )
+    url = filing.primary_document_url
+    if url is None:
+        raise ValueError(f"Filing {filing.accession_number} lists no primary document")
+    if not _ARCHIVE_URL_PATTERN.fullmatch(url):
+        raise ValueError(f"Not an expected EDGAR archive document URL: {url!r}")
+    return url
+
+
+def _check_html_filing(response: httpx.Response, url: str) -> None:
+    """Reject 200 responses that are plausibly not a filing. This is a sanity check,
+    not proof of identity; identity comes from the URL derived from submissions data."""
+    content_type = response.headers.get("Content-Type", "")
+    if not content_type.lower().startswith("text/html"):
+        raise SecResponseError(f"Expected HTML from {url}, got Content-Type {content_type!r}")
+    body = response.content
+    if not body.strip():
+        raise SecResponseError(f"Empty document from {url}")
+    if b"<html" not in body[:8192].lower():
+        raise SecResponseError(f"Response from {url} does not start like an HTML document")
+    if any(marker in body for marker in _SEC_ERROR_PAGE_MARKERS):
+        raise SecResponseError(f"SEC returned an error page instead of the filing at {url}")
 
 
 def _backoff_delay(attempt: int, retry_after: float | None) -> float:
