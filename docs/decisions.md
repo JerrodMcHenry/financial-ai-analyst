@@ -219,3 +219,35 @@ Improved detection for that format is deliberately not implemented in M2.1.
 **Constraint carried into M2.2/M2.3:**
 - Retrieval must work without section labels. A missing section must not prevent building passages, indexing, searching or verifying citations.
 - An explicit section filter keeps its meaning: it returns only passages with that label, possibly none. It never silently returns unrelated passages.
+
+## D-024 Deterministic passages with self-verifying citation ids
+**Status:** Accepted (owner-approved M2.2, 2026-11-12, after the correctness review below)
+**Decision:** `passages.py` builds passages from `ExtractedFiling` blocks and verifies citations to them offline (architecture §3.2e).
+- **Block-based grouping:** passages never cross a section (`None` included), keep headings with the following block, keep each table whole with its headings, and fill up to `TARGET_CHARS = 2000`. Only a text block longer than that is cut, at sentence ends, then spaces, then exactly 2,000 characters, with exact offsets into `ContentBlock.text`.
+- **Nothing filtered:** every block is in a passage, including page footers. This replaces the earlier footer-removal proposal (Phase A, H5).
+- **`BUILDER_VERSION = "1"`**, recorded on every passage and in its id, bumped for any change that could alter passages for the same blocks.
+- **Citation id:** `sec-psg:{cik}:{accession}:{primary_document}:{source_sha256}:x{extractor}:p{builder}:b{start_block}.{start_char}-{end_block}.{end_char}:t{text_sha256[:16]}`, with the **full** source SHA-256. `citation_id` and `text_sha256` are computed from the passage's fields, never stored.
+- **Verification:** `verify_citation(citation_id, passage, cache_dir)` uses only the filing cache. It returns `verified` (with the source blocks and document URL) or exactly one of `invalid_citation`, `source_unavailable`, `source_changed`, `extractor_changed`, `builder_changed`, `boundaries_changed`, `text_changed`.
+
+**Why:**
+- Grouping whole blocks keeps citations to block ranges that resolve to `dom_path`s, and splitting only oversized blocks keeps that true while bounding passage size.
+- Dropping footers would need a heuristic that could remove real content, and makes that content uncitable; the noise is accepted for now.
+- The range makes ids unique within a document, and the full source hash and versions make them unique across documents and code changes, so uniqueness never rests on a truncated hash. The text-hash prefix is only an extra check; verification compares full hashes and full records.
+- Computed ids make "a passage whose id disagrees with its own fields" impossible, so the only id check left is "is this the passage you cited".
+- Rebuilding from the source bytes, rather than trusting stored text, is the only way to show the cited text is still what the document says.
+
+**Alternatives:**
+- Fixed-size windows over the whole text: rejected, because they cross sections and tables and cite arbitrary offsets.
+- A truncated source hash in the id (Phase A design): rejected, so that ids from different byte versions can never collide.
+- Storing `citation_id` as a validated field: rejected, because a computed field cannot go stale and needs no validator.
+- Verifying by looking up stored text: rejected, because it can't detect a stale or edited record.
+- Resolving a citation to the closest matching passage after a change: rejected, because that silently re-points it.
+
+**Owner decisions at approval:** keep `TARGET_CHARS = 2000`, keep all source content including footers, don't split tables in M2, and allow heading-only passages when attachment isn't possible.
+
+**Correctness review (2026-11-12):**
+- **Cache semantics,** tested against the real cache:
+  - A missing or damaged entry (missing bytes, corrupted bytes, non-JSON metadata, metadata for another filing, a recorded hash that doesn't match) gives `source_unavailable`. Damaged entries are told apart only in the cache's warning log.
+  - A valid entry with a different hash gives `source_changed`.
+  - One defect was fixed: the `source_unavailable` detail said "not in the local cache" even for a damaged entry; it now says "missing or failed its integrity checks". No status or cache behavior changed.
+- **Offsets:** every passage segment is an exact slice of its block's text, and the slices cover each block with at most one space left out per cut. Tested with Unicode punctuation and characters, collapsed and non-breaking spaces, abbreviations, long paragraphs, multi-block passages, and sentence ends and spaces at exactly 2,000 and 2,001 characters. Split passages verify through the real cache. A 400-document random check found no mismatches. No offset defects were found.

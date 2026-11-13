@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–1.5 implemented** (owner-approved). Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.2 implemented** (owner-approved; M2.2 accepted after its correctness review). Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-12
 
 ---
@@ -330,6 +330,94 @@ company_facts.select_fact(facts, taxonomy, concept, unit, period_start, period_e
 - **Labels and descriptions** are SEC's taxonomy text, not company-specific.
 - **Large responses** are fully loaded into memory.
 
+### 3.2e Milestone 2.2: passages and verifiable citations (implemented)
+
+`passages.py` turns an `ExtractedFiling` into passages and verifies citations to them. It is pure and offline. There is no index, ranking or storage yet (M2.3).
+
+```
+ExtractedFiling.blocks
+  1. pieces    → each block is one piece; a heading or paragraph longer than TARGET_CHARS
+                 (2,000) is cut into pieces at sentence ends. Tables are never cut.
+  2. group     → pieces are added to the current passage in document order, or start a new one
+                 (rules below)
+  3. identify  → every passage gets a citation id derived from its own fields
+  ← list[Passage]
+```
+
+**Grouping rules** (`build_passages`, in this order):
+1. **Sections:** a passage never contains blocks with different `section` values. `None` is treated as one more value, so an unlabeled filing (an 8-K, or a 10-Q like JPMorgan's) still gets passages, grouped by headings and size only. "PART I"/"PART II" headings are unlabeled, so in a labeled filing they become small passages of their own.
+2. **Tables:** a table is a passage on its own, together with any headings directly before it (for example "CONDENSED CONSOLIDATED STATEMENTS OF OPERATIONS"). Whatever follows a table starts a new passage. `kind` is `"table"`.
+3. **Headings** start a new passage, except that consecutive headings stay together (up to TARGET_CHARS).
+4. **Text after headings always joins them,** even past TARGET_CHARS, so a heading is never cut off from the text it introduces. A heading with nothing after it in its section stands alone.
+5. **Size:** otherwise a piece joins the current passage only if the passage stays within TARGET_CHARS characters (counting separators).
+
+**Coverage.** Every block is in exactly one passage, or for a long block, each of its pieces is. Nothing is filtered: page footers, running headers and cover-page text stay as ordinary content, because silently dropping text would make some source content uncitable. Passage text is the pieces joined by `"\n\n"`.
+
+**Splitting long blocks** (`_split_text`):
+- A cut goes at the **last sentence end** that keeps the piece within 2,000 characters. A sentence end is `.`, `!` or `?` (with optional closing quotes or brackets), one space, then a capital letter, digit, `$`, opening quote or bracket.
+- Not sentence ends: a small list of abbreviations (`Inc.`, `Corp.`, `Co.`, `Ltd.`, `No.`, `vs.`, …) and initials (`U.S.`, `e.g.`, `J.`). Skipping a real sentence end only moves the cut earlier.
+- If no sentence end fits: the last space. If 2,000 characters contain no space at all: exactly at 2,000.
+- A cut at a sentence end or space leaves out only that single space. A hard cut leaves out nothing.
+- **Offsets are exact:** `char_start`/`char_end` index `ContentBlock.text` (the extractor's normalized text, not the raw HTML), and `block.text[char_start:char_end]` is the piece.
+
+**Passage-builder version.** `BUILDER_VERSION` (currently `"1"`) is recorded on every passage and is part of its citation id. Bump it whenever a change could alter passage boundaries, text, sections, kinds or ids for the same blocks, including a change to `TARGET_CHARS`, `BLOCK_SEPARATOR`, the sentence rules or the id format. An extractor change needs an `EXTRACTOR_VERSION` bump instead (§3.2b); passages record both.
+
+**Models.**
+- `PassageSource`: `filing: FilingRef`, `content_sha256` (full), `extractor_version`, `builder_version`, and computed `document_url` (the SEC archive URL). One per extracted filing, shared by its passages.
+- `Passage`: `source`, `section` (`None` when unlabeled), `kind` (`"text"`/`"table"`), the range `block_start`, `char_start`, `block_end`, `char_end` (`char_end` exclusive, in `block_end`'s text), `text`, and computed `text_sha256` (full) and `citation_id`. A range that is empty or reversed is rejected.
+- `PassageVerification`: `status`, `detail`, `citation_id`, and, only when verified, `document_url` and the source `blocks` (with `dom_path` and `element_id`).
+
+**Citation id format** (`Passage.citation_id`; `parse_citation_id` parses it back):
+
+```
+sec-psg:{cik}:{accession}:{primary_document}:{source_sha256}:x{extractor_version}:p{builder_version}:b{block_start}.{char_start}-{block_end}.{char_end}:t{text_sha256[:16]}
+sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:9415a7acef85533051c9ff5ced8e7dcbbf85664ad6c35b81a43b97559cb1374c:x2:p1:b4.0-6.41:tafd9d6a1417694ce
+```
+
+- **Parseable:** each part is validated (10-digit CIK, accession format, the archive filename allowlist, 64 lowercase hex digits, versions without `:`), so `:` only ever separates parts. `parse_citation_id` requires an exact match of the whole string.
+- **Unique:** within one document's bytes, the block/character range identifies a passage, and passages never overlap. Across documents, versions or byte changes, the id contains the full source SHA-256 and both versions. So **uniqueness never depends on a truncated hash**; the same text in two places (a repeated footer) gets two ids.
+- **Integrity:** the 16-digit text-hash prefix is an extra check in the id. The full `text_sha256` is recomputed from `text`, and verification compares rebuilt passages with full hashes and full equality.
+- **No stale ids:** `citation_id` and `text_sha256` are computed from the passage's fields, never stored inputs. A passage loaded from JSON recomputes them, so a stored id or hash that disagrees with the stored text is ignored, and a citation to the old id then fails verification.
+- **Length:** about 160 characters (the example above, built from the 10-K test fixture, is 158). It is a server-side identifier, not something an LLM should retype; later tool calling should give the model short per-request handles and map them back (§3.4).
+
+**Verification** (`verify_citation(citation_id, passage, cache_dir)`). `passage` is the record the citation claims to refer to, for example a retrieval result. Checks run in this order; the first failure is returned:
+
+| Step | Status on failure |
+|---|---|
+| `citation_id` parses, and equals `passage.citation_id` exactly (the detail names the differing parts) | `invalid_citation` |
+| `load_filing_document(cache_dir, passage.source.filing)` returns a cached document that passes the cache's integrity checks | `source_unavailable` |
+| Cached SHA-256 equals the cited full `content_sha256` | `source_changed` |
+| Cited `extractor_version` equals `EXTRACTOR_VERSION` | `extractor_changed` |
+| Cited `builder_version` equals `BUILDER_VERSION` | `builder_changed` |
+| Re-extract and rebuild all passages; one has exactly this block/character range | `boundaries_changed` |
+| That passage's full text SHA-256 equals the cited one | `text_changed` |
+| That passage equals the cited record in every field (section, kind, filing metadata) | `invalid_citation` |
+| All pass | `verified`, with `document_url` and the blocks `block_start..block_end` |
+
+Guarantees:
+- **What the cache can and cannot tell verification** (checked against the real cache in tests):
+  - `source_unavailable` covers both a **missing** entry and a **damaged** one: missing bytes, bytes that don't match the recorded hash, unreadable or non-JSON metadata, metadata for a different filing, or an unsupported schema version. `load_filing_document` returns `None` for all of them, and logs a warning (`Ignoring invalid cache entry …`) for every damaged case. The status detail says the entry is "missing or failed its integrity checks".
+  - This is deliberate. A damaged entry's recorded hash can't be trusted, so it can't support a `source_changed` claim, and the remedy is the same: fetch the document (which replaces an invalid entry) and verify again.
+  - `source_changed` is reached only when the cache holds an entry that **passes** its integrity checks but has a different full SHA-256 than the citation, for example after SEC's bytes changed and the document was downloaded again, or if bytes and recorded hash were rewritten together.
+  - If a separate status for damaged entries is ever needed, the smallest safe change is a read-only `filing_cache` helper that reports whether an entry's metadata file exists, used only to word the detail. The cache's integrity checks stay untouched.
+- **Offline:** verification takes no `SecClient` and only reads the cache. `source_unavailable` is the only retryable status: the caller may fetch the document (M1.3) and verify again.
+- **Never re-pointed:** a citation is never resolved to different bytes, other versions, a nearby range or similar text. Every mismatch is a specific failure.
+- **Content and boundaries are re-derived,** not trusted: the passage must be reproduced exactly from the source bytes with today's code.
+- **A consistent but wrong record is caught:** an edited section label or filing field with a matching recomputed id still fails the final equality check.
+- **An old version can't be verified, only reported.** After a version bump, previously issued citations return `extractor_changed` or `builder_changed`; they must be re-retrieved, never reinterpreted.
+
+**Known limitations.**
+- **Verification is per citation:** each call re-extracts the whole document (fast for the fixtures; untimed on full-size filings). Verifying many citations from one filing repeats that work.
+- **Sentence detection is heuristic:** decimals such as `3.5%` are never cut (no space follows the point), but abbreviations outside the list (for example "approx.") or a sentence starting with a lowercase word can move a cut. Cuts are still deterministic and offsets exact.
+- **Tables can be far larger than 2,000 characters,** because they are never split. Large financial statements become single large passages.
+- **Small passages:** unlabeled Part headings, a lone final heading in a section, and text between two tables become short passages of their own.
+- **Page footers and headers are included** in surrounding passages, which adds noise to text and later ranking.
+- **Continuation passages lose their heading:** when a long section continues into a second passage, that passage doesn't repeat or record the heading above it.
+- **Offsets are Python string (code point) indexes** into normalized block text, not bytes, UTF-16 units (JavaScript) or the raw HTML. A hard cut (2,000 characters without a space) can fall inside a multi-code-point sequence such as an emoji with modifiers; the slices are still exact and verifiable.
+- **Only 10-K/10-Q passages can be verified,** because the filing cache stores only those forms. Passages built from any other form report `source_unavailable`.
+- **Offsets index normalized block text,** not the raw HTML. Locating text in the source goes through each block's `dom_path`/`element_id` (§3.2b).
+- **No section filter or search yet:** the M2.1 constraint (filters return only labeled passages, never unrelated ones) is for M2.3. Passages already carry `section=None` honestly.
+
 ### 3.3 Later milestone: ingestion
 
 ```
@@ -348,10 +436,10 @@ POST /research {question}
   → agent loop (native LLM tool calling, no framework)
       LLM proposes tool call ──▶ arguments validated by Pydantic ──▶ deterministic execution
         get_financial_facts(cik, concept, periods)   → facts with fact_ids
-        search_filings(cik, query, forms, years)     → passages with chunk_ids
+        search_filings(cik, query, forms, years)     → passages with citation ids
         compute_metric(name, inputs by fact_id)      → result + formula + input ids
       tool results are returned to the LLM as data, delimited and marked untrusted
-  → LLM drafts answer that cites fact_ids / chunk_ids
+  → LLM drafts answer that cites fact_ids / passage citation ids
   → citation validator: every cited id must have come from this request's tool results;
     every number in the answer must match a tool output (otherwise flagged or rejected)
   → response: answer + resolved citations (URL, accession, period, unit) + telemetry
@@ -361,7 +449,7 @@ POST /research {question}
 
 ## 4. Directory structure
 
-### 4.1 Current structure (Milestone 1.5)
+### 4.1 Current structure (Milestone 2.2)
 
 ```
 enterprise-financial-ai-analyst/
@@ -383,6 +471,7 @@ enterprise-financial-ai-analyst/
 │       ├── sec_models.py       # SourceMetadata, FilingRef, CompanySubmissions, FilingDocument
 │       ├── filing_extractor.py # extract_filing: HTML → ordered blocks, sections, diagnostics
 │       ├── filing_cache.py     # filesystem cache for FilingDocuments (fetch / load / save)
+│       ├── passages.py         # build_passages, citation ids, offline verify_citation
 │       └── company_facts.py    # XBRL fact period classification and observation selection
 └── tests/
     ├── conftest.py             # shared settings fixture
@@ -396,6 +485,7 @@ enterprise-financial-ai-analyst/
     ├── test_filing_cache.py
     ├── test_filing_extractor.py
     ├── test_health.py
+    ├── test_passages.py
     └── test_sec_client.py
 ```
 
@@ -450,7 +540,7 @@ Behavior:
 
 ## 6. Source metadata contract
 
-Provenance is captured at three levels. Levels 1 and 2 and the extracted-content contract are implemented. Level 3 (chunks) is design only.
+Provenance is captured at three levels. Levels 1 and 2 and the extracted-content contract are implemented. Level 3 (passages) is implemented in M2.2 (§3.2e).
 
 ### Level 1: every HTTP retrieval (`SourceMetadata`, Milestone 0)
 
@@ -510,13 +600,13 @@ A model validator enforces two invariants: `sha256(content) == source.content_sh
 | `dom_path` | `str` | Element position in the parsed tree |
 | `element_id` | `str \| None` | The element's own `id` attribute |
 
-### Level 3: narrative passage (`ChunkRecord`, later, design only)
+### Level 3: narrative passage (`Passage`, Milestone 2.2)
 
-`chunk_id`, `accession_number`, `form`, `document_url`, `section` (e.g. `Item 7`), the source block indexes and their `dom_path`s, **`source_sha256` and `extractor_version`** (both required for a block reference to stay meaningful), `text_sha256`, `fiscal_period` (from the filing), `text`. Chunks will be built from `ContentBlock`s. They will reference block locations rather than character offsets into raw HTML, which the extractor does not provide (D-019).
+`Passage` = `source: PassageSource` (`filing`, full `content_sha256`, `extractor_version`, `builder_version`, computed `document_url`), `section`, `kind`, the range `block_start.char_start`–`block_end.char_end` into `ContentBlock.text`, `text`, and computed `text_sha256` and `citation_id`. Details, rules and verification: §3.2e. Not yet stored anywhere; a fiscal period for passages will come from the filing's `report_date` when retrieval needs it.
 
-### Citations (later)
+### Citations (passage ids in M2.2; validation in answers later)
 
-A citation is a **reference to a `fact_id` or `chunk_id` that was returned by a tool during the same request**. The model never writes URLs or accession numbers itself. The server resolves ids to provenance after the fact. An id that was not retrieved in the request is treated as invented, and the answer is rejected or flagged.
+A citation is a **reference to a `fact_id` or passage `citation_id` that was returned by a tool during the same request**. Passage ids and their offline verification exist since M2.2 (§3.2e); `fact_id` and the per-request check come with tool calling. The model never writes URLs or accession numbers itself. The server resolves ids to provenance after the fact. An id that was not retrieved in the request is treated as invented, and the answer is rejected or flagged.
 
 ---
 
@@ -592,7 +682,7 @@ Environment and lockfile management uses **`uv`** (already installed). It can in
 
 ---
 
-## 10. Deferred and out of scope (as of Milestone 1.5)
+## 10. Deferred and out of scope (as of Milestone 2.2)
 
 **Explicitly deferred:**
 - Older submission pages (R12).

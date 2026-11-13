@@ -2,8 +2,8 @@
 
 Enterprise Financial AI Analyst: a financial research copilot over public-company SEC filings.
 
-**Status:** Milestone 0. A minimal FastAPI service with a health endpoint and an SEC EDGAR client
-(company submissions only). See [docs/architecture.md](docs/architecture.md) and
+**Status:** Milestone 2.2. SEC filing retrieval, caching and extraction, XBRL Company Facts,
+and deterministic passages with offline-verifiable citations. Search and the LLM come later. See [docs/architecture.md](docs/architecture.md) and
 [docs/decisions.md](docs/decisions.md).
 
 ## Requirements
@@ -105,6 +105,38 @@ Sections are assigned only when their headings are unambiguous: `"Item 1A"` for 
 Part-qualified `"Part I, Item 2"` for 10-Qs, whose item numbers repeat across Parts. Each result records
 `extractor_version`; together with the source SHA-256 it identifies the exact blocks. See
 [docs/architecture.md](docs/architecture.md) §3.2b for the guarantees and limitations.
+
+## Passages and citations
+
+```python
+from financial_analyst.passages import build_passages, parse_citation_id, verify_citation
+
+passages = build_passages(extracted)  # offline and deterministic
+passage = passages[0]
+print(passage.section, passage.kind, passage.citation_id)
+
+result = verify_citation(passage.citation_id, passage, settings.filing_cache_dir)
+print(result.status, result.document_url, [b.dom_path for b in result.blocks])
+```
+
+A passage is a run of whole blocks, about 2,000 characters at most, that never crosses a section.
+Headings stay with the text after them, a table is never split, and a block longer than 2,000
+characters is cut at sentence ends with exact character offsets. Every block is kept, including
+page footers. Filings without section labels still get passages (`section=None`).
+
+A citation id names the filing, the full SHA-256 of the source bytes, the extractor and
+passage-builder versions, the block/character range and a text-hash prefix:
+
+```
+sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:<64 hex>:x2:p1:b4.0-6.41:t<16 hex>
+```
+
+`verify_citation` reads only the filing cache and never contacts SEC. It re-extracts the
+document, rebuilds its passages and returns `verified` with the source blocks and document URL,
+or the reason the citation no longer holds: `invalid_citation`, `source_unavailable`,
+`source_changed`, `extractor_changed`, `builder_changed`, `boundaries_changed` or
+`text_changed`. A citation is never re-pointed to other text. Details:
+[docs/architecture.md](docs/architecture.md) §3.2e.
 
 ## XBRL Company Facts
 
