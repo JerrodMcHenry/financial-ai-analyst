@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.3 implemented** (owner-approved); **Milestone 2.4 B1 (evaluation harness) owner-approved; B3 (real evaluation dataset) awaiting evidence-label review**. Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.4 implemented** (owner-approved: evaluation harness, real dataset and BM25 baseline); **Milestone 2.5 B1 (batch citation verification) implemented, awaiting review**. Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-13
 
 ---
@@ -380,7 +380,7 @@ sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:9415a7acef85533051c9ff
 - **No stale ids:** `citation_id` and `text_sha256` are computed from the passage's fields, never stored inputs. A passage loaded from JSON recomputes them, so a stored id or hash that disagrees with the stored text is ignored, and a citation to the old id then fails verification.
 - **Length:** about 160 characters (the example above, built from the 10-K test fixture, is 158). It is a server-side identifier, not something an LLM should retype; later tool calling should give the model short per-request handles and map them back (§3.4).
 
-**Verification** (`verify_citation(citation_id, passage, cache_dir)`). `passage` is the record the citation claims to refer to, for example a retrieval result. Checks run in this order; the first failure is returned:
+**Verification** (`verify_citation(citation_id, passage, cache_dir)`, or `verify_citations(pairs, cache_dir)` for many at once). `passage` is the record the citation claims to refer to, for example a retrieval result. Checks run in this order; the first failure is returned:
 
 | Step | Status on failure |
 |---|---|
@@ -404,6 +404,13 @@ Guarantees:
 - **Never re-pointed:** a citation is never resolved to different bytes, other versions, a nearby range or similar text. Every mismatch is a specific failure.
 - **Content and boundaries are re-derived,** not trusted: the passage must be reproduced exactly from the source bytes with today's code.
 - **A consistent but wrong record is caught:** an edited section label or filing field with a matching recomputed id still fails the final equality check.
+
+**Batch verification** (`verify_citations`, M2.5 B1, D-027). One result per `(citation_id, passage)` pair, in input order, duplicates included. `verify_citation` is a batch of one.
+- Citations are grouped by the cache's own filing identity (CIK, accession number, primary document, form). The id checks need no source and run first.
+- **Per group, once:** `load_filing_document` (a missing or damaged entry gives `source_unavailable` for the whole group), then the SHA-256 of the loaded bytes themselves.
+- Each citation then compares its own claimed full hash and versions. Two citations naming the same filing with different hashes get different results.
+- Extraction and passage building happen **at most once per group**, and only if some citation passes the hash and version checks. Rebuilt passages are looked up by their block/character range.
+- **Snapshot semantics:** every citation in a group is checked against the bytes read once at the start of that group. The file is not read again during the batch, so a change made mid-batch is seen by the next call, not this one. The guarantee is unchanged: verified text was re-derived, with today's code, from bytes whose full hash equals the citation's. Nothing derived outlives the call.
 - **An old version can't be verified, only reported.** After a version bump, previously issued citations return `extractor_changed` or `builder_changed`; they must be re-retrieved, never reinterpreted.
 
 **Known limitations.**
@@ -488,7 +495,7 @@ idf(t)      = ln(1 + (N − df(t) + 0.5) / (df(t) + 0.5))
 - **Scores are comparable only within one index.**
 - **Not evaluated yet.** Relevance is unmeasured. M2.4 must measure Recall@5 and MRR@10 on a reviewed question set with expected snippets and sections, pinned to source SHA-256s and versions, and report section-filter precision and the verification rate of returned citations.
 
-### 3.2g Milestone 2.4: offline evaluation harness (B1, approved) and real dataset (B3, awaiting review)
+### 3.2g Milestone 2.4: offline evaluation harness, real dataset and BM25 baseline (approved)
 
 `evaluation.py` measures retrieval against **pinned** filings read only from the filing cache. B1 is the harness alone. The real dataset (`evals/retrieval_v1.json`), document acquisition and the baseline run come in B2–B4. M2.4 makes no retrieval improvements.
 
@@ -500,7 +507,7 @@ dataset JSON (pins, questions, evidence spans, changelog) → load_dataset (stri
   3. KeywordIndex over all filings                                      (timed)
   4. primary: unfiltered search(query, k=10), 1 warm-up + N timed rounds; rounds must agree
   5. secondary: each filtered search, run twice; every hit re-checked against its filters
-  6. verify_citation for every distinct returned hit                    (timed separately)
+  6. verify_citations: every distinct returned hit, one batch            (timed separately)
   ← EvalReport (metrics, per-question results, filtered results, timings), or EvaluationError
 ```
 
@@ -547,7 +554,7 @@ Citation correctness and filter compliance are integrity conditions, not metrics
 - per document: cache load (with hash check), extraction and passage building;
 - index construction;
 - search latency (mean, p50, p95, max; nearest-rank percentiles), primary searches only, after one warm-up round;
-- verification latency per citation, measured separately from search, and totals per document. Each verification re-extracts its filing, so the per-document total shows the cost of repeated verification. Not optimized in M2.4.
+- verification, measured separately from search, as **one `verify_citations` batch** (`verification_ms`), plus the number of citations per document. Each filing is extracted once per batch (D-027). On the B4 corpus this took 4.9 s instead of 333 s of per-citation re-extraction. The report schema changed only here: the per-citation `verification` latency summary and the per-document `total_ms` were removed.
 
 **Network.** The runner takes no `SecClient`; documents come only through `load_filing_document`. The tests block sockets.
 
@@ -561,10 +568,10 @@ Citation correctness and filter compliance are integrity conditions, not metrics
 - Evidence must be a substring of a single block, so a claim spanning blocks needs one span per block.
 - Section precision compares labels exactly and is undefined for sectionless filings, which simply contribute non-matching hits.
 - Timings come from one machine and one run; they aren't benchmarks.
-- A full verification sweep re-extracts each filing once per citation, which may take minutes on real filings.
+- Verification still re-extracts each filing once per run, about 3.8 s for the JPMorgan 10-Q, independently of the extraction used for indexing. This is on purpose, so the check never reuses what it is checking.
 - The small question sets (6 answerable in the fixture, 18 in the real dataset) make aggregate metrics coarse; read the per-question table.
 
-**Real dataset (B3, awaiting evidence-label review): `evals/retrieval_v1.json`.**
+**Real dataset (B3, approved): `evals/retrieval_v1.json`.** Its BM25 baseline (B4) is `evals/retrieval_v1.baseline.json`.
 - **Pinned corpus.** Three cached filings, accepted by the owner in B2 with their full SHA-256 hashes, `extractor_version` 2 and `builder_version` 1:
   - Apple 10-K for fiscal 2026, accession 0000320193-26-000026;
   - Apple 10-Q for the quarter ended June 27, 2026, accession 0000320193-26-000020;

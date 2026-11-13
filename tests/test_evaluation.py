@@ -30,7 +30,12 @@ from financial_analyst.evaluation import (
 )
 from financial_analyst.filing_cache import save_filing_document
 from financial_analyst.filing_extractor import extract_filing
-from financial_analyst.passages import Passage, PassageSource, PassageVerification
+from financial_analyst.passages import (
+    Passage,
+    PassageSource,
+    PassageVerification,
+    verify_citations,
+)
 from financial_analyst.retrieval import SearchHit
 from financial_analyst.sec_models import FilingDocument, FilingRef, SourceMetadata
 
@@ -282,7 +287,7 @@ def test_runs_are_deterministic_apart_from_timings(cache):
 def test_timings_separate_search_from_verification(report):
     timings = report.timings
     assert timings.search.count == 2 * 7  # repetitions x questions, warm-up excluded
-    assert timings.verification.count == report.citations_verified
+    assert timings.verification_ms > 0
     assert sum(v.citations for v in timings.verification_by_document) == report.citations_verified
     assert [d.document for d in timings.documents] == list(FIXTURE_FILES)
     assert all(d.extract_ms >= 0 and d.build_passages_ms >= 0 for d in timings.documents)
@@ -441,14 +446,30 @@ def test_all_integrity_problems_are_reported_together(tmp_path, cache):
 
 
 def test_citation_that_fails_verification_invalidates_the_evaluation(cache, monkeypatch):
-    def failing(citation_id, passage, cache_dir):
-        return PassageVerification(
-            status="text_changed", detail="simulated", citation_id=citation_id
+    def one_fails(pairs, cache_dir):
+        results = verify_citations(pairs, cache_dir)
+        failed = PassageVerification(
+            status="text_changed", detail="simulated", citation_id=results[1].citation_id
         )
+        return [results[0], failed, *results[2:]]
 
-    monkeypatch.setattr(evaluation, "verify_citation", failing)
-    with pytest.raises(EvaluationError, match="text_changed"):
+    monkeypatch.setattr(evaluation, "verify_citations", one_fails)
+    with pytest.raises(EvaluationError) as error:
         run_evaluation(DATASET, cache)
+    assert len(error.value.problems) == 1 and "text_changed (simulated)" in error.value.problems[0]
+
+
+def test_all_returned_citations_are_verified_in_one_batch(cache, monkeypatch):
+    batches = []
+
+    def recording(pairs, cache_dir):
+        batches.append([citation_id for citation_id, _ in pairs])
+        return verify_citations(pairs, cache_dir)
+
+    monkeypatch.setattr(evaluation, "verify_citations", recording)
+    report = run_evaluation(DATASET, cache, search_repetitions=1)
+    assert len(batches) == 1 and len(set(batches[0])) == len(batches[0])
+    assert len(batches[0]) == report.citations_verified
 
 
 def test_filter_violations_are_caught_independently_of_the_index(cache, monkeypatch):

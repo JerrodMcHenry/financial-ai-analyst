@@ -301,3 +301,20 @@ Improved detection for that format is deliberately not implemented in M2.1.
 - Recall over "all relevant evidence": rejected, because labels can't be proven exhaustive.
 - Excluding sectionless or other-filing hits from section precision: rejected (owner correction).
 - Treating citation failures as a metric: rejected; they invalidate the run.
+
+## D-027 Batch citation verification against one snapshot per filing
+**Status:** Proposed (M2.5 B1, 2026-11-13)
+**Decision:** `verify_citations(pairs, cache_dir)` in `passages.py` verifies many citations at once (architecture §3.2e). `verify_citation` is a batch of one. The evaluation verifies every distinct returned citation in one batch.
+- **Grouping:** by the cache's filing identity (CIK, accession number, primary document, form). Each group loads the cache entry once and hashes the loaded bytes once. It extracts and builds passages at most once, and only when some citation passes the hash and version checks. Passages are matched by block/character range.
+- **Unchanged:** the citation id format, the checks and their order, every status and detail, the `PassageVerification` fields, and the behavior for malformed ids, mismatched passages and missing or damaged cache entries.
+- **No persistent state:** nothing derived is kept after the call. A second batch reads and extracts again.
+- **Report timing:** `Timings.verification_ms` (one batch) and per-document citation counts replace the per-citation latency summary and per-document `total_ms`. This is the only report schema change.
+
+**Integrity tradeoff:** within a batch, each filing is checked as **one consistent snapshot**: the bytes read at the start of its group. They are not re-read for every citation. A cache change made during a batch is therefore detected by the next batch, not the current one. Source integrity is not weakened: every verified passage is still re-derived from bytes whose full SHA-256 equals the citation's, and a damaged entry is still `source_unavailable`. Before this change, each citation re-read the file, which only made the snapshot smaller; it was never atomic across a run.
+
+**Why:** on the B4 corpus, 176 citations took 333 s, about 98% of the run, because each one re-extracted its filing. With one extraction per filing per batch, verification takes 4.9 s and a whole evaluation 11 s, with identical rankings, metrics and statuses.
+
+**Alternatives:**
+- A process-wide memo keyed by the hash of freshly read bytes: rejected for now, because hidden global state needs eviction, thread safety and test isolation.
+- Saving extractions to disk: rejected, because it adds a derived artifact with its own staleness and tampering risks.
+- Verifying against the passages the evaluation already built: rejected, because the check would compare the run's output with itself.

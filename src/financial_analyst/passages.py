@@ -11,6 +11,7 @@ cached document and reports why it no longer matches, instead of resolving to ot
 
 import hashlib
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -207,15 +208,54 @@ def verify_citation(citation_id: str, passage: Passage, cache_dir: Path) -> Pass
     result. Uses only the filing cache and never contacts SEC. A source_unavailable result
     can be retried after the caller fetches the document. Every other failure is final for
     this citation: it is never re-pointed to different bytes, versions or text.
+
+    A batch of one: see verify_citations.
     """
+    return verify_citations([(citation_id, passage)], cache_dir)[0]
 
-    def fail(status: VerificationStatus, detail: str) -> PassageVerification:
-        return PassageVerification(status=status, detail=detail, citation_id=citation_id)
 
+def verify_citations(
+    pairs: Iterable[tuple[str, Passage]], cache_dir: Path
+) -> list[PassageVerification]:
+    """Verify many (citation_id, passage) pairs; one result per pair, in input order.
+
+    Each result is the one verify_citation defines, but the work is shared per filing:
+    each distinct cached filing is loaded and hashed once, and extracted and rebuilt at
+    most once (only if some citation passes the earlier checks). Every citation of a filing
+    is checked against that one snapshot of its bytes; the file is not read again within
+    the batch. Nothing derived is kept after the call returns.
+    """
+    pairs = list(pairs)
+    results: list[PassageVerification | None] = [None] * len(pairs)
+    by_filing: dict[tuple[str, str, str | None, str], list[int]] = {}
+    for position, (citation_id, passage) in enumerate(pairs):
+        failure = _check_identity(citation_id, passage)
+        if failure is not None:
+            results[position] = failure
+            continue
+        filing = passage.source.filing
+        # The cache's own identity: these fields alone choose and validate the cache entry.
+        key = (filing.cik, filing.accession_number, filing.primary_document, filing.form)
+        by_filing.setdefault(key, []).append(position)
+
+    for positions in by_filing.values():
+        group = [pairs[position] for position in positions]
+        for position, result in zip(positions, _verify_filing(group, cache_dir), strict=True):
+            results[position] = result
+    assert all(result is not None for result in results)
+    return results
+
+
+def _failure(status: VerificationStatus, detail: str, citation_id: str) -> PassageVerification:
+    return PassageVerification(status=status, detail=detail, citation_id=citation_id)
+
+
+def _check_identity(citation_id: str, passage: Passage) -> PassageVerification | None:
+    """The checks that need no source: the id parses and names exactly this passage."""
     try:
         cited = parse_citation_id(citation_id)
     except ValueError as exc:
-        return fail("invalid_citation", str(exc))
+        return _failure("invalid_citation", str(exc), citation_id)
     if citation_id != passage.citation_id:
         expected = parse_citation_id(passage.citation_id)
         differing = [
@@ -223,56 +263,106 @@ def verify_citation(citation_id: str, passage: Passage, cache_dir: Path) -> Pass
             for name in CitationId.model_fields
             if getattr(cited, name) != getattr(expected, name)
         ]
-        return fail("invalid_citation", f"citation id does not match the passage in: {differing}")
+        return _failure(
+            "invalid_citation",
+            f"citation id does not match the passage in: {differing}",
+            citation_id,
+        )
+    return None
 
-    source = passage.source
+
+def _verify_filing(group: list[tuple[str, Passage]], cache_dir: Path) -> list[PassageVerification]:
+    """Verify citations that all name the same cached filing, against one read of it."""
     # None covers both a missing entry and one that failed the cache's integrity checks
     # (logged by filing_cache). Either way there is no trustworthy copy, and a damaged
     # entry's recorded hash cannot be used to claim the source changed.
-    document = load_filing_document(cache_dir, source.filing)
-    if document is None:
-        return fail(
-            "source_unavailable",
-            "no valid cached copy of the filing document: the cache entry is missing or failed "
-            "its integrity checks; fetch the document and verify again",
-        )
-    if document.source.content_sha256 != source.content_sha256:
-        return fail(
-            "source_changed",
-            f"cached document has SHA-256 {document.source.content_sha256}, "
-            f"citation requires {source.content_sha256}",
-        )
-    if source.extractor_version != EXTRACTOR_VERSION:
-        return fail(
-            "extractor_changed",
-            f"cited with extractor {source.extractor_version}, current is {EXTRACTOR_VERSION}",
-        )
-    if source.builder_version != BUILDER_VERSION:
-        return fail(
-            "builder_changed",
-            f"cited with passage builder {source.builder_version}, current is {BUILDER_VERSION}",
-        )
+    document = load_filing_document(cache_dir, group[0][1].source.filing)
+    # The hash of the exact bytes that get extracted below, not only the recorded one.
+    sha256 = hashlib.sha256(document.content).hexdigest() if document else None
+    extracted: ExtractedFiling | None = None
+    rebuilt_by_span: dict[tuple[int, int, int, int], Passage] = {}
+    results = []
+    for citation_id, passage in group:
+        source = passage.source
+        if document is None:
+            results.append(
+                _failure(
+                    "source_unavailable",
+                    "no valid cached copy of the filing document: the cache entry is missing "
+                    "or failed its integrity checks; fetch the document and verify again",
+                    citation_id,
+                )
+            )
+            continue
+        if sha256 != source.content_sha256:
+            results.append(
+                _failure(
+                    "source_changed",
+                    f"cached document has SHA-256 {sha256}, "
+                    f"citation requires {source.content_sha256}",
+                    citation_id,
+                )
+            )
+            continue
+        if source.extractor_version != EXTRACTOR_VERSION:
+            results.append(
+                _failure(
+                    "extractor_changed",
+                    f"cited with extractor {source.extractor_version}, "
+                    f"current is {EXTRACTOR_VERSION}",
+                    citation_id,
+                )
+            )
+            continue
+        if source.builder_version != BUILDER_VERSION:
+            results.append(
+                _failure(
+                    "builder_changed",
+                    f"cited with passage builder {source.builder_version}, "
+                    f"current is {BUILDER_VERSION}",
+                    citation_id,
+                )
+            )
+            continue
+        if extracted is None:  # at most once per group, and only when a citation gets here
+            extracted = extract_filing(document)
+            # Ranges are unique within one build: passages cover the blocks once, in order.
+            rebuilt_by_span = {_span(p): p for p in build_passages(extracted)}
+        results.append(_compare_rebuilt(citation_id, passage, extracted, rebuilt_by_span))
+    return results
 
-    extracted = extract_filing(document)
-    span = _span(passage)
-    rebuilt = next((p for p in build_passages(extracted) if _span(p) == span), None)
+
+def _compare_rebuilt(
+    citation_id: str,
+    passage: Passage,
+    extracted: ExtractedFiling,
+    rebuilt_by_span: dict[tuple[int, int, int, int], Passage],
+) -> PassageVerification:
+    rebuilt = rebuilt_by_span.get(_span(passage))
     if rebuilt is None:
-        return fail("boundaries_changed", "no rebuilt passage has this block/character range")
+        return _failure(
+            "boundaries_changed", "no rebuilt passage has this block/character range", citation_id
+        )
     if rebuilt.text_sha256 != passage.text_sha256:
-        return fail("text_changed", "the rebuilt passage with this range has different text")
+        return _failure(
+            "text_changed", "the rebuilt passage with this range has different text", citation_id
+        )
     if rebuilt != passage:
         differing = [
             name
             for name in Passage.model_fields
             if getattr(rebuilt, name) != getattr(passage, name)
         ]
-        return fail("invalid_citation", f"passage metadata differs from the source: {differing}")
-
+        return _failure(
+            "invalid_citation",
+            f"passage metadata differs from the source: {differing}",
+            citation_id,
+        )
     return PassageVerification(
         status="verified",
         detail="re-extracted from the cached document and rebuilt identically",
         citation_id=citation_id,
-        document_url=source.document_url,
+        document_url=passage.source.document_url,
         blocks=extracted.blocks[passage.block_start : passage.block_end + 1],
     )
 

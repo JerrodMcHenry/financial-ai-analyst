@@ -20,6 +20,7 @@ from financial_analyst.passages import (
     build_passages,
     parse_citation_id,
     verify_citation,
+    verify_citations,
 )
 from financial_analyst.sec_models import FilingDocument, FilingRef, SourceMetadata
 
@@ -535,3 +536,222 @@ def test_citation_must_match_the_passage_it_claims(cached, no_network):
     relabeled = passage.model_copy(update={"section": "Item 7"})
     result = verify_citation(relabeled.citation_id, relabeled, cache_dir)
     assert result.status == "invalid_citation" and "section" in result.detail
+
+
+# --- Batch verification ------------------------------------------------------------------
+
+ENTRY_10Q = "filings/0000320193/000032019326000020/aapl-20260627.htm"
+
+
+def make_10q_document(content: bytes = SAMPLE_10Q) -> FilingDocument:
+    """A second filing, with its own cache entry."""
+    document = make_document(content, form="10-Q")
+    filing = document.filing.model_copy(
+        update={"accession_number": "0000320193-26-000020", "primary_document": "aapl-20260627.htm"}
+    )
+    source = SourceMetadata.model_validate(
+        {**document.source.model_dump(), "source_url": filing.primary_document_url}
+    )
+    return FilingDocument(filing=filing, content=content, source=source)
+
+
+@pytest.fixture
+def two_filings(tmp_path):
+    """A cache with the 10-K and 10-Q samples (two filings), and passages from each."""
+    tenk, tenq = make_document(SAMPLE), make_10q_document()
+    save_filing_document(tmp_path, tenk)
+    save_filing_document(tmp_path, tenq)
+    return tmp_path, build_passages(extract_filing(tenk)), build_passages(extract_filing(tenq))
+
+
+@pytest.fixture
+def counts(monkeypatch):
+    """Counts cache loads and extractions done by verification."""
+    calls = {"load": 0, "extract": 0}
+    load, extract = passages_module.load_filing_document, passages_module.extract_filing
+
+    def counting_load(*args):
+        calls["load"] += 1
+        return load(*args)
+
+    def counting_extract(*args):
+        calls["extract"] += 1
+        return extract(*args)
+
+    monkeypatch.setattr(passages_module, "load_filing_document", counting_load)
+    monkeypatch.setattr(passages_module, "extract_filing", counting_extract)
+    return calls
+
+
+def pair(passage: Passage) -> tuple[str, Passage]:
+    return passage.citation_id, passage
+
+
+def with_source(passage: Passage, **changes) -> Passage:
+    return passage.model_copy(update={"source": passage.source.model_copy(update=changes)})
+
+
+def rewrite_entry(cache_dir: Path, entry: str, content: bytes) -> None:
+    """Replace a cache entry's bytes and recorded hash together: still a valid entry."""
+    metadata_path = cache_dir / (entry + ".json")
+    metadata = json.loads(metadata_path.read_text())
+    metadata["source"]["content_sha256"] = hashlib.sha256(content).hexdigest()
+    (cache_dir / entry).write_bytes(content)
+    metadata_path.write_text(json.dumps(metadata))
+
+
+def mixed_batch(tenk: list[Passage], tenq: list[Passage]) -> list[tuple[str, Passage]]:
+    """Every status, from two filings, interleaved, with a duplicate."""
+    passage = tenk[3]
+    return [
+        pair(tenk[0]),
+        pair(tenq[2]),
+        ("sec-psg:not-an-id", passage),  # invalid_citation: malformed
+        (tenk[4].citation_id, passage),  # invalid_citation: names another passage
+        pair(passage.model_copy(update={"section": "Item 7"})),  # invalid_citation: metadata
+        pair(with_source(passage, content_sha256="0" * 64)),  # source_changed
+        pair(with_source(passage, extractor_version="0")),  # extractor_changed
+        pair(with_source(passage, builder_version="0")),  # builder_changed
+        pair(passage.model_copy(update={"char_end": 40, "text": passage.text[:-1]})),
+        pair(passage.model_copy(update={"text": passage.text.replace("2026", "2027")})),
+        pair(tenq[0]),
+        pair(tenk[0]),  # duplicate of the first pair
+    ]
+
+
+MIXED_STATUSES = [
+    "verified",
+    "verified",
+    "invalid_citation",
+    "invalid_citation",
+    "invalid_citation",
+    "source_changed",
+    "extractor_changed",
+    "builder_changed",
+    "boundaries_changed",
+    "text_changed",
+    "verified",
+    "verified",
+]
+
+
+def test_batch_results_equal_single_item_results(two_filings, no_network):
+    cache_dir, tenk, tenq = two_filings
+    pairs = mixed_batch(tenk, tenq) + [pair(p) for p in tenk + tenq]
+    batch = verify_citations(pairs, cache_dir)
+    assert batch == [verify_citation(c, p, cache_dir) for c, p in pairs]
+    assert [r.status for r in batch[: len(MIXED_STATUSES)]] == MIXED_STATUSES
+    assert all(r.status == "verified" for r in batch[len(MIXED_STATUSES) :])
+
+
+def test_output_follows_input_order_and_keeps_duplicates(two_filings, no_network):
+    cache_dir, tenk, tenq = two_filings
+    pairs = mixed_batch(tenk, tenq)
+    forward = verify_citations(pairs, cache_dir)
+    assert [r.citation_id for r in forward] == [c for c, _ in pairs]
+    assert forward[0] == forward[-1]  # the duplicate gets its own, identical result
+    assert verify_citations(list(reversed(pairs)), cache_dir) == list(reversed(forward))
+    assert verify_citations([], cache_dir) == []
+
+
+def test_each_filing_is_loaded_and_extracted_once_per_batch(two_filings, no_network, counts):
+    cache_dir, tenk, tenq = two_filings
+    pairs = [pair(p) for p in tenk + tenq]
+    pairs += pairs  # every citation twice, both filings interleaved by position
+    results = verify_citations(pairs, cache_dir)
+    assert all(r.status == "verified" for r in results)
+    assert counts == {"load": 2, "extract": 2}
+
+
+def test_citations_rejected_before_extraction_extract_nothing(two_filings, no_network, counts):
+    cache_dir, tenk, _ = two_filings
+    passage = tenk[3]
+    pairs = [
+        ("sec-psg:not-an-id", passage),
+        (tenk[4].citation_id, passage),
+        pair(with_source(passage, content_sha256="0" * 64)),
+        pair(with_source(passage, extractor_version="0")),
+        pair(with_source(passage, builder_version="0")),
+    ]
+    statuses = [r.status for r in verify_citations(pairs, cache_dir)]
+    assert statuses == [
+        "invalid_citation",
+        "invalid_citation",
+        "source_changed",
+        "extractor_changed",
+        "builder_changed",
+    ]
+    # The two malformed or mismatched ids never reach the cache at all.
+    assert counts == {"load": 1, "extract": 0}
+
+
+def test_unavailable_filing_extracts_nothing(tmp_path, no_network, counts):
+    passages = build(SAMPLE)
+    results = verify_citations([pair(p) for p in passages], tmp_path)
+    assert {r.status for r in results} == {"source_unavailable"}
+    assert counts == {"load": 1, "extract": 0}
+
+
+def test_repeated_batches_share_no_derived_state(two_filings, no_network, counts):
+    cache_dir, tenk, _ = two_filings
+    first = verify_citations([pair(tenk[3])], cache_dir)
+    second = verify_citations([pair(tenk[3])], cache_dir)
+    assert first == second and first[0].status == "verified"
+    assert counts == {"load": 2, "extract": 2}
+
+
+def test_source_mutation_between_batches_is_detected(two_filings, no_network):
+    cache_dir, tenk, tenq = two_filings
+    pairs = [pair(tenk[3]), pair(tenq[2])]
+    assert [r.status for r in verify_citations(pairs, cache_dir)] == ["verified", "verified"]
+    rewrite_entry(cache_dir, ENTRY, SAMPLE + b"<p>appended</p>")
+    assert [r.status for r in verify_citations(pairs, cache_dir)] == ["source_changed", "verified"]
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        _corrupt,  # not valid JSON
+        _edit_metadata(lambda m: m["source"].update(content_sha256="0" * 64)),
+        _edit_metadata(lambda m: m["filing"].update(form="10-Q")),
+    ],
+)
+def test_invalid_cache_metadata_never_verifies(two_filings, no_network, damage):
+    cache_dir, tenk, tenq = two_filings
+    damage(cache_dir / (ENTRY + ".json"))
+    results = verify_citations([pair(tenk[3]), pair(tenq[2]), pair(tenk[0])], cache_dir)
+    assert [r.status for r in results] == ["source_unavailable", "verified", "source_unavailable"]
+    assert results[0].blocks == [] and results[0].document_url is None
+
+
+def test_different_claimed_hashes_for_the_same_filing(two_filings, no_network, counts):
+    # Both passages name the same cache entry; only the cached bytes' hash verifies.
+    cache_dir, tenk, _ = two_filings
+    edited = build(SAMPLE.replace(b"2026", b"2027"))[3]
+    assert edited.source.filing == tenk[3].source.filing
+    results = verify_citations([pair(edited), pair(tenk[3]), pair(edited)], cache_dir)
+    assert [r.status for r in results] == ["source_changed", "verified", "source_changed"]
+    assert hashlib.sha256(SAMPLE).hexdigest() in results[0].detail
+    assert counts == {"load": 1, "extract": 1}
+
+
+def test_a_batch_never_mixes_source_bytes(two_filings, no_network, monkeypatch):
+    """The cache entry is replaced right after the batch reads it: every citation in that
+    batch is still checked against the bytes first read, and the next batch sees the change."""
+    cache_dir, tenk, _ = two_filings
+    load = passages_module.load_filing_document
+    loads = []
+
+    def load_then_replace(*args):
+        document = load(*args)
+        loads.append(document.source.content_sha256)
+        rewrite_entry(cache_dir, ENTRY, SAMPLE + b"<p>replaced</p>")
+        return document
+
+    monkeypatch.setattr(passages_module, "load_filing_document", load_then_replace)
+    results = verify_citations([pair(p) for p in tenk], cache_dir)
+    assert {r.status for r in results} == {"verified"}
+    assert loads == [hashlib.sha256(SAMPLE).hexdigest()]  # read once, before the change
+
+    monkeypatch.setattr(passages_module, "load_filing_document", load)
+    assert verify_citations([pair(tenk[3])], cache_dir)[0].status == "source_changed"

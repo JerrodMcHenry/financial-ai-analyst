@@ -22,6 +22,7 @@ import platform
 import statistics
 import sys
 import time
+from collections import Counter
 from datetime import date
 from pathlib import Path
 from typing import Literal
@@ -31,7 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from financial_analyst.config import Settings
 from financial_analyst.filing_cache import load_filing_document
 from financial_analyst.filing_extractor import EXTRACTOR_VERSION, ExtractedFiling, extract_filing
-from financial_analyst.passages import BUILDER_VERSION, Passage, build_passages, verify_citation
+from financial_analyst.passages import BUILDER_VERSION, Passage, build_passages, verify_citations
 from financial_analyst.retrieval import KeywordIndex, SearchHit
 from financial_analyst.sec_models import FilingRef
 
@@ -350,8 +351,7 @@ class VerificationTiming(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     document: str
-    citations: int
-    total_ms: float  # each verification re-extracts the whole filing
+    citations: int  # distinct returned citations from this filing
 
 
 class Timings(BaseModel):
@@ -364,7 +364,9 @@ class Timings(BaseModel):
     documents: list[DocumentTiming]
     index_build_ms: float
     search: LatencySummary  # primary (unfiltered) searches only, after one warm-up round
-    verification: LatencySummary  # measured separately from search
+    # One verify_citations batch, measured separately from search: each filing is loaded,
+    # hashed, extracted and rebuilt once, then every citation is checked.
+    verification_ms: float
     verification_by_document: list[VerificationTiming]
 
 
@@ -539,16 +541,17 @@ def run_evaluation(
     for hits in [*primary.values(), *(hits for _, _, hits in filtered)]:
         for hit in hits:
             distinct.setdefault(hit.citation_id, hit)
-    verification_ms: list[float] = []
-    by_document: dict[str, list[float]] = {}
-    for citation_id, hit in distinct.items():
-        started = time.perf_counter()
-        result = verify_citation(citation_id, hit.passage, cache_dir)
-        elapsed = _ms_since(started)
-        verification_ms.append(elapsed)
-        by_document.setdefault(key_by_sha[hit.passage.source.content_sha256], []).append(elapsed)
+    started = time.perf_counter()
+    results = verify_citations(
+        [(citation_id, hit.passage) for citation_id, hit in distinct.items()], cache_dir
+    )
+    verification_ms = _ms_since(started)
+    for result in results:
         if result.status != "verified":
-            problems.append(f"citation {citation_id}: {result.status} ({result.detail})")
+            problems.append(f"citation {result.citation_id}: {result.status} ({result.detail})")
+    citations_by_document = Counter(
+        key_by_sha[hit.passage.source.content_sha256] for hit in distinct.values()
+    )
     if problems:
         raise EvaluationError(problems)
 
@@ -594,10 +597,10 @@ def run_evaluation(
             documents=document_timings,
             index_build_ms=index_build_ms,
             search=_summarize(search_ms),
-            verification=_summarize(verification_ms),
+            verification_ms=verification_ms,
             verification_by_document=[
-                VerificationTiming(document=key, citations=len(times), total_ms=sum(times))
-                for key, times in by_document.items()
+                VerificationTiming(document=key, citations=count)
+                for key, count in citations_by_document.items()
             ],
         ),
     )
@@ -725,7 +728,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"citations verified {report.citations_verified}; "
         f"search p50 {t.search.p50_ms:.2f} ms, p95 {t.search.p95_ms:.2f} ms; "
-        f"verification p50 {t.verification.p50_ms:.1f} ms, max {t.verification.max_ms:.1f} ms"
+        f"verification batch {t.verification_ms / 1000:.1f} s"
     )
     return 0
 

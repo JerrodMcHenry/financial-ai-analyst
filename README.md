@@ -2,10 +2,10 @@
 
 Enterprise Financial AI Analyst: a financial research copilot over public-company SEC filings.
 
-**Status:** Milestone 2.4 (B3). SEC filing retrieval, caching and extraction, XBRL Company Facts,
-deterministic passages with offline-verifiable citations, in-memory BM25 keyword search, an
-offline retrieval-evaluation harness, and a real evaluation dataset awaiting label review. The
-baseline evaluation and the LLM come later. See [docs/architecture.md](docs/architecture.md) and
+**Status:** Milestone 2.5 (B1). SEC filing retrieval, caching and extraction, XBRL Company Facts,
+deterministic passages with offline-verifiable citations (verified in batches), in-memory BM25
+keyword search, an offline retrieval-evaluation harness, a real evaluation dataset and its BM25
+baseline. The LLM comes later. See [docs/architecture.md](docs/architecture.md) and
 [docs/decisions.md](docs/decisions.md).
 
 ## Requirements
@@ -181,12 +181,13 @@ a labeled span.
 The evaluation is refused (exit code 2, every problem listed) if a document is missing or
 differs from its pin, evidence can't be located exactly once, results aren't repeatable, a
 filtered hit breaks its filter, or any returned citation fails `verify_citation`. Relevance
-misses are results, not errors. Search latency and citation-verification latency are reported
-separately. The fixture dataset tests the harness.
+misses are results, not errors. Search latency and citation-verification time are reported
+separately. All returned citations are verified in one batch, which extracts each filing once. The fixture dataset tests the harness.
 
 The real dataset, `evals/retrieval_v1.json`, has 20 questions over three pinned filings: Apple's
-fiscal 2026 10-K, Apple's June 2026 10-Q and JPMorgan's September 2026 10-Q. It is awaiting
-label review. It can only be reproduced from the local filing cache. The pins are raw-byte
+fiscal 2026 10-K, Apple's June 2026 10-Q and JPMorgan's September 2026 10-Q. Its BM25
+baseline is `evals/retrieval_v1.baseline.json`. It can only be reproduced from the local filing
+cache. The pins are raw-byte
 SHA-256 hashes of the cached copies, and a fresh download of an unchanged filing has been
 observed to differ by a few bytes, so keep `data/sec-cache`. Details:
 [docs/architecture.md](docs/architecture.md) §3.2g.
