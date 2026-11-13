@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.3 implemented** (owner-approved). Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.3 implemented** (owner-approved); **Milestone 2.4 B1 (evaluation harness) implemented, awaiting review**. Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-12
 
 ---
@@ -488,6 +488,82 @@ idf(t)      = ln(1 + (N − df(t) + 0.5) / (df(t) + 0.5))
 - **Scores are comparable only within one index.**
 - **Not evaluated yet.** Relevance is unmeasured. M2.4 must measure Recall@5 and MRR@10 on a reviewed question set with expected snippets and sections, pinned to source SHA-256s and versions, and report section-filter precision and the verification rate of returned citations.
 
+### 3.2g Milestone 2.4 B1: offline evaluation harness (implemented, awaiting review)
+
+`evaluation.py` measures retrieval against **pinned** filings read only from the filing cache. B1 is the harness alone. The real dataset (`evals/retrieval_v1.json`), document acquisition and the baseline run come in B2–B4. M2.4 makes no retrieval improvements.
+
+```
+dataset JSON (pins, questions, evidence spans, changelog) → load_dataset (strict schema, SHA-256 of the file)
+  1. per pinned filing: load_filing_document (cache only) → check full SHA-256, extractor and builder pins
+     → extract_filing → build_passages                                  (timed separately)
+  2. resolve every evidence span to block.text[start:end]               (any failure: refuse)
+  3. KeywordIndex over all filings                                      (timed)
+  4. primary: unfiltered search(query, k=10), 1 warm-up + N timed rounds; rounds must agree
+  5. secondary: each filtered search, run twice; every hit re-checked against its filters
+  6. verify_citation for every distinct returned hit                    (timed separately)
+  ← EvalReport (metrics, per-question results, filtered results, timings), or EvaluationError
+```
+
+**Dataset schema** (strict: unknown fields are rejected as typos).
+- `documents`: `key`, `cik`, `accession_number`, `form`, `primary_document`, `filing_date`, and the pin: full `content_sha256`, `extractor_version`, `builder_version`.
+- `questions`: `id`, `query`, `kind` (`direct`, `paraphrase`, `unanswerable`), `topic`, `asks_for_amount`, `expected_sections` (document + section), `evidence`, `filtered_searches`.
+  - **Answerable questions need evidence; unanswerable questions may have none.**
+  - `asks_for_amount` marks a question that asks for a financial amount. It is still **narrative evidence retrieval**: a number found in text is text-sourced, never an authoritative XBRL value or a calculation input (§7).
+- `evidence`: `document`, `snippet` (an exact substring of one block's text, at least 20 characters), `block_index`, `section` (the block's extracted label, or `null`).
+- `filtered_searches`: any of `section`, `form` and `document` (restricts to its accession), plus `expect_empty`.
+- `changelog`: every question or label change with its reason. The last entry must name the current `dataset_version`, so label changes are versioned and reviewable in git. The report records the dataset file's SHA-256.
+
+**Labels are a reviewed, non-exhaustive evidence set.** They are written by reading the filings, never by consulting BM25 rankings (the B3 procedure: read whole sections; you review every span). Recall is therefore **labeled-evidence recall**, never recall over all evidence a filing might contain.
+
+**Evidence matching.**
+- A span resolves only if its snippet occurs **exactly once in the whole filing**, inside the labeled block, and that block has the labeled section. Labels point at text, not passage ids, so they survive changes to passage boundaries.
+- **Relevance:** a passage is relevant to a span if that one passage contains at least **80%** of the span's characters (`RELEVANCE_THRESHOLD`), in the same document (full SHA-256). Overlap is computed from the passage's block/character range. A one-character overlap never counts; a span cut by a passage split may still count if 80% lies in one passage.
+- **Combined coverage** is measured separately: the share of the span's characters contained in the union of the top-five passages. A span reaching 80% only in combination is counted as `split_evidence`, and is not a Hit.
+
+**Metrics.** "Answerable" excludes `unanswerable` questions. Relevance uses the unfiltered top 10 (`RESULTS_PER_SEARCH`).
+
+| Metric | Definition |
+|---|---|
+| Hit@5 | Mean over answerable questions of 1 if any top-5 hit is relevant, else 0 |
+| MRR@10 | Mean over answerable questions of 1/rank of the first relevant hit in the top 10, else 0 |
+| Labeled-evidence recall@5 | Per question: labeled spans covered (≥ 80%) by at least one single top-5 passage, divided by its labeled spans; then the mean |
+| Combined evidence coverage@5 | Per question: mean over its spans of the share of characters in the union of the top-5 passages; then the mean |
+| Section precision@5 | Only questions with expected sections: top-5 hits whose (document, section) is expected, divided by **all** top-5 hits. Hits from other filings and sectionless passages stay in the denominator. Undefined (`null`) with no hits. |
+| Filtered Hit@5, MRR@10 | The same, over filtered searches that expect results, reported separately as secondary |
+
+- **Hit@5 vs labeled-evidence recall@5:** Hit@5 asks whether *anything* usable reached the top five. Recall asks *how much* of the labeled evidence did. A question with four spans and one found has Hit@5 = 1 and recall = 0.25.
+- Results are reported overall, for direct and for paraphrase questions, plus a per-question table (citation ids, scores, relevant ranks, `asks_for_amount`). Unanswerable questions report what BM25 returned anyway (hits and scores), with no relevance metric.
+
+**Integrity: the evaluation is refused, with every problem listed, when:**
+- a pinned document is missing or invalid in the cache, its SHA-256 or filing date differs from the pin, or `EXTRACTOR_VERSION`/`BUILDER_VERSION` differ from the pin;
+- an evidence span doesn't resolve (missing, ambiguous, wrong block or wrong section);
+- primary results differ between rounds, or a filtered search isn't repeatable;
+- a filtered hit violates its filters (re-checked independently of the index), or an `expect_empty` search returns hits;
+- **any returned citation fails `verify_citation`.**
+
+Citation correctness and filter compliance are integrity conditions, not metrics: they must hold 100% or there is no report. Relevance misses never invalidate an evaluation.
+
+**Performance instrumentation** (`time.perf_counter`; informational, excluded from determinism checks):
+- per document: cache load (with hash check), extraction and passage building;
+- index construction;
+- search latency (mean, p50, p95, max; nearest-rank percentiles), primary searches only, after one warm-up round;
+- verification latency per citation, measured separately from search, and totals per document. Each verification re-extracts its filing, so the per-document total shows the cost of repeated verification. Not optimized in M2.4.
+
+**Network.** The runner takes no `SecClient`; documents come only through `load_filing_document`. The tests block sockets.
+
+**CLI:** `uv run python -m financial_analyst.evaluation DATASET [--cache-dir DIR] [--output FILE] [--repetitions N]`. It prints a summary, optionally writes the JSON report, and exits 0, or 2 with the integrity problems on stderr. `--cache-dir` defaults to the configured default path (`data/sec-cache`) without reading `.env`.
+
+**Offline fixtures.** `tests/fixtures/eval_sample.json` pins the existing 10-K and 10-Q samples and a new sectionless sample (`filing_sectionless_sample.htm`: plain-text Item lines and topic headings, like the JPMorgan 10-Q). It has 7 questions: direct, paraphrase, an amount question, the sectionless scenario, filtered searches including a section filter that must return nothing, and one unanswerable question. Its numbers test the harness, not BM25 quality.
+
+**Known limitations.**
+- Labels can only be as complete as the review; recall is over labeled evidence.
+- Relevance is binary, with one fixed 80% threshold and no graded relevance.
+- Evidence must be a substring of a single block, so a claim spanning blocks needs one span per block.
+- Section precision compares labels exactly and is undefined for sectionless filings, which simply contribute non-matching hits.
+- Timings come from one machine and one run; they aren't benchmarks.
+- A full verification sweep re-extracts each filing once per citation, which may take minutes on real filings.
+- The small question sets (6 answerable in the fixture, 18 planned) make aggregate metrics coarse; read the per-question table.
+
 ### 3.3 Later milestone: ingestion
 
 ```
@@ -519,7 +595,7 @@ POST /research {question}
 
 ## 4. Directory structure
 
-### 4.1 Current structure (Milestone 2.3)
+### 4.1 Current structure (Milestone 2.4 B1)
 
 ```
 enterprise-financial-ai-analyst/
@@ -543,6 +619,7 @@ enterprise-financial-ai-analyst/
 │       ├── filing_cache.py     # filesystem cache for FilingDocuments (fetch / load / save)
 │       ├── passages.py         # build_passages, citation ids, offline verify_citation
 │       ├── retrieval.py        # tokenize, KeywordIndex (BM25), select_latest_filing
+│       ├── evaluation.py       # offline retrieval evaluation: dataset, metrics, runner, CLI
 │       └── company_facts.py    # XBRL fact period classification and observation selection
 └── tests/
     ├── conftest.py             # shared settings fixture
@@ -550,8 +627,11 @@ enterprise-financial-ai-analyst/
     │   ├── submissions_sample.json   # trimmed EDGAR submissions payload
     │   ├── companyfacts_sample.json  # hand-written Company Facts payload (illustrative values)
     │   ├── filing_sample.htm         # trimmed inline-XBRL 10-K-style HTML
-    │   └── filing_10q_sample.htm     # trimmed inline-XBRL 10-Q-style HTML (Parts I/II)
+    │   ├── filing_10q_sample.htm     # trimmed inline-XBRL 10-Q-style HTML (Parts I/II)
+    │   ├── filing_sectionless_sample.htm  # 10-Q-style HTML with no detectable sections
+    │   └── eval_sample.json          # evaluation dataset pinning the three sample filings
     ├── test_company_facts.py
+    ├── test_evaluation.py
     ├── test_config.py
     ├── test_filing_cache.py
     ├── test_filing_extractor.py
@@ -754,7 +834,7 @@ Environment and lockfile management uses **`uv`** (already installed). It can in
 
 ---
 
-## 10. Deferred and out of scope (as of Milestone 2.3)
+## 10. Deferred and out of scope (as of Milestone 2.4 B1)
 
 **Explicitly deferred:**
 - Older submission pages (R12).

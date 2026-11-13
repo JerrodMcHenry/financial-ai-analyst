@@ -277,3 +277,27 @@ Improved detection for that format is deliberately not implemented in M2.1.
 - Per-filter statistics: rejected, because scores would depend on the filter and need a corpus pass per query.
 - Weighting repeated query terms (query term frequency): rejected for now; explicit repetition is rare in analyst queries and easy to abuse.
 - Falling back to unlabeled passages when a section filter matches nothing: rejected by the M2.1 constraint.
+
+## D-026 Offline retrieval evaluation harness with pinned filings and span-based labels
+**Status:** Accepted (owner-approved M2.4 B1, 2026-11-12)
+**Decision:** `evaluation.py` evaluates retrieval from a strict JSON dataset against filings read only from the filing cache (architecture §3.2g).
+- **Pins:** each filing's full SHA-256, `extractor_version` and `builder_version` must match the cache and the current code, or the evaluation is refused.
+- **Labels are exact text spans** (a snippet unique in the filing, its block and section), written by reading the filings, never from BM25 rankings. They are a reviewed, **non-exhaustive** evidence set, versioned through `dataset_version` and a required `changelog`.
+- **Relevance:** one passage must contain at least 80% of a span's characters. Spans split across passages are measured separately as combined coverage and `split_evidence`.
+- **Metrics:** Hit@5, MRR@10, labeled-evidence recall@5, combined evidence coverage@5 and section precision@5 (every top-five hit in the denominator) over the unfiltered combined index (primary). Filtered searches are secondary.
+- **Integrity vs relevance:** missing or mismatched documents, unresolvable evidence, non-repeatable results, filter violations and **any citation that fails verification** refuse the evaluation (`EvaluationError`, exit code 2). Relevance misses are reported, never errors.
+- **Timing:** extraction, passage building, index construction, search and verification are timed separately. Nothing is optimized.
+
+**Why:**
+- Pins make a result reproducible and say exactly what was measured. Comparing across different bytes or versions without re-validation would be meaningless.
+- Spans survive chunking changes, so a builder change can be measured against the same labels. Requiring uniqueness and the extracted section catches labels that drifted with an extractor change.
+- The 80% threshold stops a shared boundary character from counting as relevance, while tolerating the single space a passage split omits.
+- Counting every top-five hit in section precision keeps hits from unrelated or sectionless filings from being silently excluded.
+- Citation and filter correctness are guarantees, not scores: an evaluation that returns unverifiable citations is invalid, not merely worse.
+
+**Alternatives:**
+- Labels as passage citation ids: rejected, because they break whenever passage boundaries change.
+- Any-overlap relevance: rejected (owner correction), because a one-character overlap would count.
+- Recall over "all relevant evidence": rejected, because labels can't be proven exhaustive.
+- Excluding sectionless or other-filing hits from section precision: rejected (owner correction).
+- Treating citation failures as a metric: rejected; they invalidate the run.

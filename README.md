@@ -2,9 +2,9 @@
 
 Enterprise Financial AI Analyst: a financial research copilot over public-company SEC filings.
 
-**Status:** Milestone 2.3. SEC filing retrieval, caching and extraction, XBRL Company Facts,
-deterministic passages with offline-verifiable citations, and in-memory BM25 keyword search.
-Evaluation and the LLM come later. See [docs/architecture.md](docs/architecture.md) and
+**Status:** Milestone 2.4 (B1). SEC filing retrieval, caching and extraction, XBRL Company Facts,
+deterministic passages with offline-verifiable citations, in-memory BM25 keyword search, and an
+offline retrieval-evaluation harness. The real evaluation dataset and the LLM come later. See [docs/architecture.md](docs/architecture.md) and
 [docs/decisions.md](docs/decisions.md).
 
 ## Requirements
@@ -161,6 +161,28 @@ returns only passages with exactly that label, so it returns nothing for a filin
 section labels. Without a section filter, every filing is searchable. Each hit carries the
 unchanged passage and its citation id, ready for `verify_citation`. Details and limitations:
 [docs/architecture.md](docs/architecture.md) §3.2f.
+
+## Evaluating retrieval
+
+```bash
+uv run python -m financial_analyst.evaluation DATASET.json --output report.json
+# reads filings from data/sec-cache by default (--cache-dir to change); never contacts SEC
+```
+
+The evaluation reads a dataset that pins each filing by its full SHA-256 and the extractor and
+passage-builder versions, and labels evidence as exact text spans written by reading the
+filings, not by searching them. It loads the filings only from the filing cache (never from
+SEC), searches one combined BM25 index without filters, and reports Hit@5, MRR@10,
+labeled-evidence recall@5, combined evidence coverage@5 and section precision@5, with filtered
+searches reported separately. A passage counts as relevant only if it contains at least 80% of
+a labeled span.
+
+The evaluation is refused (exit code 2, every problem listed) if a document is missing or
+differs from its pin, evidence can't be located exactly once, results aren't repeatable, a
+filtered hit breaks its filter, or any returned citation fails `verify_citation`. Relevance
+misses are results, not errors. Search latency and citation-verification latency are reported
+separately. The fixture dataset tests the harness; the real dataset (`evals/`) comes in a later
+step. Details: [docs/architecture.md](docs/architecture.md) §3.2g.
 
 ## XBRL Company Facts
 

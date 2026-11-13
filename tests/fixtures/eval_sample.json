@@ -1,0 +1,113 @@
+{
+  "dataset_version": "1",
+  "documents": [
+    {
+      "key": "sample-10k",
+      "cik": "0000320193",
+      "accession_number": "0000320193-26-000026",
+      "form": "10-K",
+      "primary_document": "aapl-20260926.htm",
+      "filing_date": "2026-11-03",
+      "content_sha256": "9415a7acef85533051c9ff5ced8e7dcbbf85664ad6c35b81a43b97559cb1374c",
+      "extractor_version": "2",
+      "builder_version": "1"
+    },
+    {
+      "key": "sample-10q",
+      "cik": "0000320193",
+      "accession_number": "0000320193-26-000020",
+      "form": "10-Q",
+      "primary_document": "aapl-20260627.htm",
+      "filing_date": "2026-08-01",
+      "content_sha256": "b8b9f8fbbdd167666314fb74115833f968e5946ce3524977927fe0fa0449a6be",
+      "extractor_version": "2",
+      "builder_version": "1"
+    },
+    {
+      "key": "sample-sectionless",
+      "cik": "0000099999",
+      "accession_number": "0000099999-26-000042",
+      "form": "10-Q",
+      "primary_document": "bank-20260930.htm",
+      "filing_date": "2026-11-04",
+      "content_sha256": "0d2c530ca74d87f648d098cf4688a7e01d50627a21c939529c87832f49cd3feb",
+      "extractor_version": "2",
+      "builder_version": "1"
+    }
+  ],
+  "questions": [
+    {
+      "id": "q-products",
+      "query": "What products does the Company design, manufacture and market?",
+      "kind": "direct",
+      "topic": "business",
+      "expected_sections": [{"document": "sample-10k", "section": "Item 1"}],
+      "evidence": [
+        {"document": "sample-10k", "snippet": "designs, manufactures and markets smartphones", "block_index": 5, "section": "Item 1"}
+      ]
+    },
+    {
+      "id": "q-net-sales",
+      "query": "What were net sales for 2026?",
+      "kind": "direct",
+      "topic": "business",
+      "asks_for_amount": true,
+      "expected_sections": [{"document": "sample-10k", "section": "Item 1"}],
+      "evidence": [
+        {"document": "sample-10k", "snippet": "Net sales for 2026 were $416,161 million.", "block_index": 6, "section": "Item 1"}
+      ]
+    },
+    {
+      "id": "q-political",
+      "query": "Could unrest abroad hurt the company?",
+      "kind": "paraphrase",
+      "topic": "risk factors",
+      "expected_sections": [{"document": "sample-10k", "section": "Item 1A"}],
+      "evidence": [
+        {"document": "sample-10k", "snippet": "business can be affected by political events", "block_index": 8, "section": "Item 1A"}
+      ]
+    },
+    {
+      "id": "q-10q-risk-updates",
+      "query": "What risk-factor updates did the company disclose in its quarterly report?",
+      "kind": "direct",
+      "topic": "risk factors",
+      "expected_sections": [{"document": "sample-10q", "section": "Part II, Item 1A"}],
+      "evidence": [
+        {"document": "sample-10q", "snippet": "There have been no material changes to the risk factors", "block_index": 17, "section": "Part II, Item 1A"}
+      ],
+      "filtered_searches": [{"section": "Part II, Item 1A", "document": "sample-10q"}]
+    },
+    {
+      "id": "q-credit-losses",
+      "query": "What does the bank say about its allowance for credit losses?",
+      "kind": "direct",
+      "topic": "accounting",
+      "evidence": [
+        {"document": "sample-sectionless", "snippet": "The allowance for credit losses increased, reflecting a net addition to reserves", "block_index": 5, "section": null}
+      ],
+      "filtered_searches": [
+        {"section": "Part I, Item 2", "document": "sample-sectionless", "expect_empty": true},
+        {"document": "sample-sectionless"}
+      ]
+    },
+    {
+      "id": "q-capital",
+      "query": "How much capital does the bank hold compared with what regulators require?",
+      "kind": "paraphrase",
+      "topic": "capital",
+      "evidence": [
+        {"document": "sample-sectionless", "snippet": "Standardized CET1 capital ratio remained above all applicable regulatory requirements", "block_index": 7, "section": null}
+      ]
+    },
+    {
+      "id": "q-oil-gas",
+      "query": "What are the proved oil and gas reserves?",
+      "kind": "unanswerable",
+      "topic": "unanswerable"
+    }
+  ],
+  "changelog": [
+    {"dataset_version": "1", "date": "2026-11-12", "change": "Offline fixture dataset for the evaluation harness tests."}
+  ]
+}
