@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.4 implemented** (owner-approved: evaluation harness, real dataset and BM25 baseline); **Milestone 2.5 B1 (batch citation verification) implemented, awaiting review**. Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.4 implemented** (owner-approved: evaluation harness, real dataset and BM25 baseline); **Milestone 2.5 B1 (batch citation verification) approved; B2 (held-out evaluation dataset) awaiting review**. Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-13
 
 ---
@@ -585,6 +585,28 @@ Citation correctness and filter compliance are integrity conditions, not metrics
   - **A possible cause:** each cached file ends with the same `<script>` element, whose path looks like a random token, just before `</body>`. A response-dependent script added outside the filing could explain the difference.
   - **This is not proven.** The earlier bytes weren't kept, so it is an observation, not an established SEC behavior.
   - **The practical consequence:** downloading an unchanged filing again may produce different bytes. Its citations would then report `source_changed`.
+
+**Held-out dataset (M2.5 B2, awaiting review): `evals/retrieval_v2_heldout.json`.** For comparing BM25, semantic and hybrid retrieval. `retrieval_v1` remains the development set.
+- **Same pinned corpus** as `retrieval_v1` (identical pins), so results are comparable.
+- **Questions:** 40 in total: 16 direct, 20 paraphrase and 4 unanswerable, with 67 evidence spans; 22 questions need more than one span.
+- **Coverage:** risk, MD&A, business and accounting topics; company-specific questions (Apple Card in JPMorgan's filing, Google in Apple's); period-specific questions (June 2026 quarter against fiscal 2026); and sectionless JPMorgan questions.
+- **Independence:** written by reading the extracted filings, with no retrieval of any kind run on these questions. It shares no question, query or evidence block with `retrieval_v1`.
+- **It is a test set.** It is run once per pre-registered configuration; questions and labels are not changed in response to its results.
+
+**Reading the metrics on this set.** The harness is unchanged; three different things are measured:
+- **Passage relevance:** one passage contains at least 80% of one labeled span. Hit@5 and MRR@10 ask whether *any* labeled span is well covered near the top. For a multi-evidence question, one span is enough.
+- **Labeled-evidence recall@5:** the share of a question's labeled spans that some top-5 passage covers. Labels are non-exhaustive, so this is recall over labeled evidence, not over everything a filing says.
+- **Multi-evidence answer completeness:** whether the top five together contain *every* fact the answer needs. The harness doesn't report it as a metric.
+  - When each span is a different required fact, completeness means recall@5 = 1.0 for that question.
+  - When the spans are repeats of the same fact in different blocks (for example a disclosure repeated in a note), recall@5 below 1.0 doesn't mean the answer is incomplete.
+  - The per-question table must be read for this.
+
+**Known labeling limitations.**
+- **Repeats** of a labeled fact were found by reading and by an exact-text and figure scan, not by search. Paraphrased restatements elsewhere can still be unlabeled.
+- **Deliberately unlabeled:** other-period disclosures of the same measure, such as nine-month Equity Markets revenue or year-over-year VaR.
+- **Some spans are table rows,** such as ratings, rate sensitivity and dividends per share. They count as relevant only when a passage holds the row's text, which for tables means the whole table passage.
+- **Unanswerable questions** were checked by pattern search over every block of all three filings. Related but unsupporting text exists on purpose, as a hard negative: JPMorgan's "outlook", climate-risk mentions, December 2025 capital ratios, and mentions of Apple's retail stores without a count.
+- **Small sample:** with 36 answerable questions, one question moves Hit@5 by about 2.8 points.
 
 ### 3.3 Later milestone: ingestion
 

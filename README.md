@@ -2,7 +2,7 @@
 
 Enterprise Financial AI Analyst: a financial research copilot over public-company SEC filings.
 
-**Status:** Milestone 2.5 (B1). SEC filing retrieval, caching and extraction, XBRL Company Facts,
+**Status:** Milestone 2.5 (B2). SEC filing retrieval, caching and extraction, XBRL Company Facts,
 deterministic passages with offline-verifiable citations (verified in batches), in-memory BM25
 keyword search, an offline retrieval-evaluation harness, a real evaluation dataset and its BM25
 baseline. The LLM comes later. See [docs/architecture.md](docs/architecture.md) and
@@ -189,7 +189,9 @@ fiscal 2026 10-K, Apple's June 2026 10-Q and JPMorgan's September 2026 10-Q. Its
 baseline is `evals/retrieval_v1.baseline.json`. It can only be reproduced from the local filing
 cache. The pins are raw-byte
 SHA-256 hashes of the cached copies, and a fresh download of an unchanged filing has been
-observed to differ by a few bytes, so keep `data/sec-cache`. Details:
+observed to differ by a few bytes, so keep `data/sec-cache`. A separate held-out set,
+`evals/retrieval_v2_heldout.json` (40 questions over the same three filings), is reserved for
+comparing retrieval methods and is never used for tuning. Details:
 [docs/architecture.md](docs/architecture.md) §3.2g.
 
 ## XBRL Company Facts

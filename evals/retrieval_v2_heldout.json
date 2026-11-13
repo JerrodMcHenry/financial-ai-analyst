@@ -1,0 +1,484 @@
+{
+  "dataset_version": "1",
+  "documents": [
+    {
+      "key": "aapl-10k-2026",
+      "cik": "0000320193",
+      "accession_number": "0000320193-26-000026",
+      "form": "10-K",
+      "primary_document": "aapl-20260926.htm",
+      "filing_date": "2026-11-03",
+      "content_sha256": "ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231",
+      "extractor_version": "2",
+      "builder_version": "1"
+    },
+    {
+      "key": "aapl-10q-2026-06",
+      "cik": "0000320193",
+      "accession_number": "0000320193-26-000020",
+      "form": "10-Q",
+      "primary_document": "aapl-20260627.htm",
+      "filing_date": "2026-07-31",
+      "content_sha256": "ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5",
+      "extractor_version": "2",
+      "builder_version": "1"
+    },
+    {
+      "key": "jpm-10q-2026-09",
+      "cik": "0000019617",
+      "accession_number": "0001628280-26-069523",
+      "form": "10-Q",
+      "primary_document": "jpm-20260930.htm",
+      "filing_date": "2026-11-03",
+      "content_sha256": "2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b",
+      "extractor_version": "2",
+      "builder_version": "1"
+    }
+  ],
+  "questions": [
+    {
+      "id": "h-aapl-10k-indirect-channel-share",
+      "query": "What percentage of Apple's fiscal 2026 net sales came through indirect distribution channels?",
+      "kind": "direct",
+      "topic": "business",
+      "asks_for_amount": true,
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 1"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "During 2026, the Company’s net sales through its indirect distribution channels accounted for approximately 60% of total net sales.", "block_index": 77, "section": "Item 1"}
+      ],
+      "filtered_searches": [{"section": "Item 1", "document": "aapl-10k-2026"}]
+    },
+    {
+      "id": "h-aapl-10k-workforce-size",
+      "query": "How many people worked for Apple at the end of its 2026 fiscal year?",
+      "kind": "paraphrase",
+      "topic": "business",
+      "asks_for_amount": true,
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 1"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "As of September 26, 2026, the Company had approximately 167,000 full-time equivalent employees.", "block_index": 98, "section": "Item 1"}
+      ]
+    },
+    {
+      "id": "h-aapl-10k-employee-development",
+      "query": "What does Apple do to help its staff build skills and speak up about problems?",
+      "kind": "paraphrase",
+      "topic": "business",
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 1"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "The Company offers programs through Apple University on leadership, management and influence, as well as Apple culture and values.", "block_index": 100, "section": "Item 1"},
+        {"document": "aapl-10k-2026", "snippet": "Team members are encouraged to come to their managers with questions, feedback or concerns", "block_index": 101, "section": "Item 1"}
+      ]
+    },
+    {
+      "id": "h-aapl-10k-final-assembly",
+      "query": "Who actually builds Apple's devices, and in which countries?",
+      "kind": "paraphrase",
+      "topic": "business",
+      "expected_sections": [
+        {"document": "aapl-10k-2026", "section": "Item 1A"},
+        {"document": "aapl-10k-2026", "section": "Item 8"}
+      ],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "on partners primarily located in Asia for final assembly of substantially all of the Company’s hardware products", "block_index": 136, "section": "Item 1A"},
+        {"document": "aapl-10k-2026", "snippet": "Substantially all of the Company’s hardware products are manufactured by outsourcing partners that are located primarily in China mainland, India, Japan, South Korea, Taiwan and Vietnam.", "block_index": 613, "section": "Item 8"}
+      ]
+    },
+    {
+      "id": "h-aapl-10k-agentic-ai-risk",
+      "query": "What risks does Apple associate with autonomous or agentic artificial intelligence systems?",
+      "kind": "direct",
+      "topic": "risk",
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 1A"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "unintended or unauthorized actions by autonomous or agentic systems", "block_index": 186, "section": "Item 1A"},
+        {"document": "aapl-10k-2026", "snippet": "artificial intelligence agents and other technologies can take actions autonomously", "block_index": 187, "section": "Item 1A"}
+      ],
+      "filtered_searches": [{"section": "Item 1A", "document": "aapl-10k-2026"}]
+    },
+    {
+      "id": "h-aapl-10k-reseller-dependence",
+      "query": "Could phone companies and other stores that sell iPhones hurt Apple's business?",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 1A"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "The Company distributes its products and certain of its services through cellular network carriers and other resellers, many of which distribute products and services from competitors.", "block_index": 170, "section": "Item 1A"},
+        {"document": "aapl-10k-2026", "snippet": "resellers could stop distributing the Company’s products", "block_index": 171, "section": "Item 1A"}
+      ]
+    },
+    {
+      "id": "h-aapl-10k-excess-inventory-risk",
+      "query": "Could Apple get stuck with parts or products it cannot use?",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 1A"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "the Company may incur write-downs, impairments and other charges given the rapid and unpredictable pace of product obsolescence", "block_index": 148, "section": "Item 1A"},
+        {"document": "aapl-10k-2026", "snippet": "there is a risk the Company will forecast incorrectly and order or produce excess or insufficient amounts of components or products", "block_index": 149, "section": "Item 1A"}
+      ]
+    },
+    {
+      "id": "h-aapl-10k-dollar-exposure",
+      "query": "How do swings in the value of the dollar affect Apple's sales and margins?",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "expected_sections": [
+        {"document": "aapl-10k-2026", "section": "Item 1A"},
+        {"document": "aapl-10k-2026", "section": "Item 7A"}
+      ],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "The weakening of foreign currencies relative to the U.S. dollar adversely affects the U.S. dollar value of the Company’s foreign currency–denominated sales and earnings", "block_index": 228, "section": "Item 1A"},
+        {"document": "aapl-10k-2026", "snippet": "Changes in exchange rates, and in particular a strengthening of the U.S. dollar, will negatively affect the Company’s net sales and gross margins as expressed in U.S. dollars.", "block_index": 394, "section": "Item 7A"}
+      ]
+    },
+    {
+      "id": "h-aapl-10k-fx-value-at-risk",
+      "query": "What one-day value-at-risk did Apple estimate for its foreign currency derivative positions as of September 26, 2026?",
+      "kind": "direct",
+      "topic": "risk",
+      "asks_for_amount": true,
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 7A"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "a maximum one-day loss in fair value of $560 million and $590 million as of September 26, 2026 and September 27, 2025, respectively", "block_index": 395, "section": "Item 7A"}
+      ],
+      "filtered_searches": [{"section": "Item 7A", "document": "aapl-10k-2026"}]
+    },
+    {
+      "id": "h-aapl-10k-rate-shock-portfolio",
+      "query": "If interest rates jumped by a full percentage point, how much value would Apple's investment holdings lose?",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "asks_for_amount": true,
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 7A"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "Investment portfolio | 100 basis points, all tenors | Decline in fair value | $ | 2,608 | $ | 2,416", "block_index": 392, "section": "Item 7A"}
+      ]
+    },
+    {
+      "id": "h-aapl-10k-rd-expense-drivers",
+      "query": "Why did Apple's research and development expense increase in fiscal 2026?",
+      "kind": "direct",
+      "topic": "mda",
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 7"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "R&D expense increased during 2026 compared to 2025 primarily due to higher infrastructure-related costs, including investments in artificial intelligence, and headcount-related expenses.", "block_index": 351, "section": "Item 7"}
+      ]
+    },
+    {
+      "id": "h-aapl-10k-unrecognized-tax-benefits",
+      "query": "What were Apple's gross unrecognized tax benefits as of September 26, 2026?",
+      "kind": "direct",
+      "topic": "accounting",
+      "asks_for_amount": true,
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 8"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "the total amount of gross unrecognized tax benefits was $22.5 billion, of which $10.6 billion, if recognized, would impact the Company’s effective tax rate", "block_index": 551, "section": "Item 8"},
+        {"document": "aapl-10k-2026", "snippet": "the total amount of gross unrecognized tax benefits was $22.5 billion, of which $10.6 billion, if recognized, would impact the Company’s effective tax rate", "block_index": 640, "section": "Item 8"}
+      ],
+      "filtered_searches": [{"section": "Item 8", "document": "aapl-10k-2026"}]
+    },
+    {
+      "id": "h-aapl-10k-inventory-costing",
+      "query": "Which cost-flow assumption does Apple use to value the goods it holds in stock?",
+      "kind": "paraphrase",
+      "topic": "accounting",
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 8"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "Inventories are measured using the first-in, first-out method.", "block_index": 451, "section": "Item 8"}
+      ]
+    },
+    {
+      "id": "h-aapl-10k-asu-2023-09-adoption",
+      "query": "According to Apple's fiscal 2026 Form 10-K, when and how did Apple adopt ASU 2023-09 on income tax disclosures?",
+      "kind": "direct",
+      "topic": "accounting",
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 8"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "Beginning with the 2026 annual reporting period, the Company adopted the FASB’s ASU No. 2023-09", "block_index": 439, "section": "Item 8"},
+        {"document": "aapl-10k-2026", "snippet": "The Company adopted ASU 2023-09 using a prospective transition method.", "block_index": 439, "section": "Item 8"}
+      ]
+    },
+    {
+      "id": "h-aapl-10q-accelerated-repurchases",
+      "query": "What accelerated share repurchase agreements did Apple enter into in May 2026?",
+      "kind": "direct",
+      "topic": "mda",
+      "asks_for_amount": true,
+      "expected_sections": [{"document": "aapl-10q-2026-06", "section": "Part II, Item 2"}],
+      "evidence": [
+        {"document": "aapl-10q-2026-06", "snippet": "In May 2026, the Company entered into new accelerated share repurchase agreements (“ASRs”).", "block_index": 285, "section": "Part II, Item 2"},
+        {"document": "aapl-10q-2026-06", "snippet": "in exchange for up-front payments totaling $10.0 billion", "block_index": 285, "section": "Part II, Item 2"}
+      ],
+      "filtered_searches": [{"section": "Part II, Item 2", "document": "aapl-10q-2026-06"}]
+    },
+    {
+      "id": "h-aapl-10q-ipad-decline",
+      "query": "Which Apple product line sold less in the June 2026 quarter than a year earlier, and why?",
+      "kind": "paraphrase",
+      "topic": "mda",
+      "expected_sections": [{"document": "aapl-10q-2026-06", "section": "Part I, Item 2"}],
+      "evidence": [
+        {"document": "aapl-10q-2026-06", "snippet": "iPad net sales decreased during the third quarter of 2026 compared to the third quarter of 2025 primarily due to lower net sales of iPad mini® and iPad Air®.", "block_index": 182, "section": "Part I, Item 2"}
+      ]
+    },
+    {
+      "id": "h-aapl-10q-greater-china-q3",
+      "query": "What drove Apple's Greater China net sales growth in the third quarter of fiscal 2026?",
+      "kind": "direct",
+      "topic": "mda",
+      "expected_sections": [{"document": "aapl-10q-2026-06", "section": "Part I, Item 2"}],
+      "evidence": [
+        {"document": "aapl-10q-2026-06", "snippet": "Greater China net sales increased during the third quarter and first nine months of 2026 compared to the same periods in 2025 primarily due to higher net sales of iPhone.", "block_index": 168, "section": "Part I, Item 2"}
+      ],
+      "filtered_searches": [{"section": "Part I, Item 2", "document": "aapl-10q-2026-06"}]
+    },
+    {
+      "id": "h-aapl-10q-services-margin-flat",
+      "query": "Did Apple's services business keep more or less of each sales dollar as profit in the June 2026 quarter than a year before?",
+      "kind": "paraphrase",
+      "topic": "mda",
+      "expected_sections": [{"document": "aapl-10q-2026-06", "section": "Part I, Item 2"}],
+      "evidence": [
+        {"document": "aapl-10q-2026-06", "snippet": "Services gross margin percentage was flat during the third quarter of 2026 compared to the third quarter of 2025.", "block_index": 196, "section": "Part I, Item 2"}
+      ]
+    },
+    {
+      "id": "h-aapl-10q-commercial-paper",
+      "query": "How much short-term borrowing did Apple have outstanding at the end of June 2026, compared with the prior September?",
+      "kind": "paraphrase",
+      "topic": "accounting",
+      "asks_for_amount": true,
+      "expected_sections": [{"document": "aapl-10q-2026-06", "section": "Part I, Item 1"}],
+      "evidence": [
+        {"document": "aapl-10q-2026-06", "snippet": "As of June 27, 2026 and September 27, 2025, the Company had $2.0 billion and $8.0 billion of commercial paper outstanding, respectively.", "block_index": 116, "section": "Part I, Item 1"}
+      ]
+    },
+    {
+      "id": "h-aapl-10q-manufacturing-obligations",
+      "query": "What were Apple's manufacturing purchase obligations as of June 27, 2026?",
+      "kind": "direct",
+      "topic": "mda",
+      "asks_for_amount": true,
+      "expected_sections": [{"document": "aapl-10q-2026-06", "section": "Part I, Item 2"}],
+      "evidence": [
+        {"document": "aapl-10q-2026-06", "snippet": "As of June 27, 2026, the Company had manufacturing purchase obligations of $57.0 billion, with $56.2 billion payable within 12 months.", "block_index": 216, "section": "Part I, Item 2"}
+      ]
+    },
+    {
+      "id": "h-aapl-epic-supreme-court",
+      "query": "Will the U.S. Supreme Court hear Apple's appeal in its fight with Epic Games?",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "expected_sections": [
+        {"document": "aapl-10q-2026-06", "section": "Part II, Item 1"},
+        {"document": "aapl-10k-2026", "section": "Item 3"}
+      ],
+      "evidence": [
+        {"document": "aapl-10q-2026-06", "snippet": "On June 30, 2026, the Supreme Court granted the Company’s petition to review the applicable legal standard for civil contempt.", "block_index": 249, "section": "Part II, Item 1"},
+        {"document": "aapl-10k-2026", "snippet": "On June 30, 2026, the Supreme Court granted the Company’s petition to review the applicable legal standard for civil contempt.", "block_index": 259, "section": "Item 3"}
+      ]
+    },
+    {
+      "id": "h-aapl-doj-antitrust-allegations",
+      "query": "What does the U.S. Department of Justice allege in its antitrust lawsuit against Apple?",
+      "kind": "direct",
+      "topic": "risk",
+      "expected_sections": [
+        {"document": "aapl-10q-2026-06", "section": "Part II, Item 1"},
+        {"document": "aapl-10q-2026-06", "section": "Part II, Item 1A"},
+        {"document": "aapl-10k-2026", "section": "Item 3"},
+        {"document": "aapl-10k-2026", "section": "Item 1A"}
+      ],
+      "evidence": [
+        {"document": "aapl-10q-2026-06", "snippet": "alleging monopolization or attempted monopolization in the markets for “performance smartphones” and “smartphones” in violation of U.S. antitrust laws", "block_index": 247, "section": "Part II, Item 1"},
+        {"document": "aapl-10q-2026-06", "snippet": "civil antitrust lawsuits in the U.S. alleging monopolization or attempted monopolization", "block_index": 270, "section": "Part II, Item 1A"},
+        {"document": "aapl-10k-2026", "snippet": "alleging monopolization or attempted monopolization in the markets for “performance smartphones” and “smartphones” in violation of U.S. antitrust laws", "block_index": 257, "section": "Item 3"},
+        {"document": "aapl-10k-2026", "snippet": "civil antitrust lawsuits in the U.S. alleging monopolization or attempted monopolization", "block_index": 213, "section": "Item 1A"}
+      ]
+    },
+    {
+      "id": "h-aapl-10q-online-safety-minors",
+      "query": "Could laws meant to protect children online force Apple to change how it operates?",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "expected_sections": [{"document": "aapl-10q-2026-06", "section": "Part II, Item 1A"}],
+      "evidence": [
+        {"document": "aapl-10q-2026-06", "snippet": "regarding online safety, including enhanced protections for minors and mandatory age verification requirements", "block_index": 278, "section": "Part II, Item 1A"},
+        {"document": "aapl-10q-2026-06", "snippet": "significant modifications to the Company’s products, services and operations", "block_index": 278, "section": "Part II, Item 1A"}
+      ]
+    },
+    {
+      "id": "h-aapl-google-search-remedies",
+      "query": "How could the remedies in Google's search antitrust case affect Apple's revenue?",
+      "kind": "direct",
+      "topic": "risk",
+      "expected_sections": [
+        {"document": "aapl-10q-2026-06", "section": "Part II, Item 1A"},
+        {"document": "aapl-10k-2026", "section": "Item 1A"}
+      ],
+      "evidence": [
+        {"document": "aapl-10q-2026-06", "snippet": "these remedies could materially adversely affect the Company’s ability to earn revenue from such licensing arrangements", "block_index": 272, "section": "Part II, Item 1A"},
+        {"document": "aapl-10k-2026", "snippet": "these remedies could materially adversely affect the Company’s ability to earn revenue from such licensing arrangements", "block_index": 215, "section": "Item 1A"}
+      ]
+    },
+    {
+      "id": "h-aapl-10q-internal-control-changes",
+      "query": "Did Apple report any change to its financial reporting controls during the June 2026 quarter?",
+      "kind": "paraphrase",
+      "topic": "accounting",
+      "expected_sections": [{"document": "aapl-10q-2026-06", "section": "Part I, Item 4"}],
+      "evidence": [
+        {"document": "aapl-10q-2026-06", "snippet": "There were no changes in the Company’s internal control over financial reporting during the third quarter of 2026", "block_index": 240, "section": "Part I, Item 4"}
+      ]
+    },
+    {
+      "id": "h-jpm-apple-card-transaction",
+      "query": "What is JPMorgan's Apple Card transaction, and when is it expected to close?",
+      "kind": "direct",
+      "topic": "business",
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "On January 7, 2026, JPMorganChase announced that Chase will become the new issuer of Apple Card.", "block_index": 29, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "with an expected closing date approximately 24 months thereafter", "block_index": 29, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "On January 7, 2026, JPMorganChase announced that Chase will become the new issuer of Apple Card.", "block_index": 1818, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "with an expected closing date approximately 24 months thereafter", "block_index": 1818, "section": null}
+      ],
+      "filtered_searches": [{"document": "jpm-10q-2026-09"}]
+    },
+    {
+      "id": "h-jpm-markets-revenue-q3",
+      "query": "How did JPMorgan's Equity Markets and Fixed Income Markets revenue change in the third quarter of 2026?",
+      "kind": "direct",
+      "topic": "mda",
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "Equity Markets revenue was $5.0 billion, up 49%, driven by strong performance across products, particularly in Prime and Derivatives.", "block_index": 439, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "Fixed Income Markets revenue was $5.4 billion, down 4%, driven by lower revenue in Commodities,", "block_index": 440, "section": null}
+      ],
+      "filtered_searches": [{"section": "Part I, Item 2", "document": "jpm-10q-2026-09", "expect_empty": true}]
+    },
+    {
+      "id": "h-jpm-client-money-growth",
+      "query": "How much money does JPMorgan manage for clients, and what made that amount grow?",
+      "kind": "paraphrase",
+      "topic": "business",
+      "asks_for_amount": true,
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "Assets under management were $5.2 trillion, up 13%, and client assets were $7.9 trillion, up 15%. These increases were driven by continued net inflows and higher market levels.", "block_index": 539, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "Assets under management (\"AUM\") of $5.2 trillion, up 13%", "block_index": 88, "section": null}
+      ]
+    },
+    {
+      "id": "h-jpm-trading-loss-measure-change",
+      "query": "Did JPMorgan's estimate of its potential one-day trading losses change much from the previous quarter?",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "Average total VaR for the three months ended September 30, 2026 decreased by $1 million, when compared with June 30, 2026", "block_index": 1050, "section": null}
+      ]
+    },
+    {
+      "id": "h-jpm-earnings-at-risk",
+      "query": "What is JPMorgan's earnings-at-risk sensitivity to a 100 basis point parallel shift in interest rates as of September 30, 2026?",
+      "kind": "direct",
+      "topic": "risk",
+      "asks_for_amount": true,
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "+100 bps shift in rates | $ | 1.4 | $ | 2.1", "block_index": 1078, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "-100 bps shift in rates | (2.2) | (2.4)", "block_index": 1078, "section": null}
+      ]
+    },
+    {
+      "id": "h-jpm-criticized-wholesale-exposure",
+      "query": "Are more of JPMorgan's corporate borrowers showing signs of trouble, and in which industries?",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "Total criticized exposure, excluding loans held-for-sale and loans at fair value, was $52.1 billion and $48.5 billion as of September 30, 2026 and December 31, 2025", "block_index": 924, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "The increase in criticized exposure was predominantly driven by certain exposures in Consumer & Retail and Technology, Media & Telecommunications", "block_index": 924, "section": null}
+      ]
+    },
+    {
+      "id": "h-jpm-parent-credit-ratings",
+      "query": "What grades do the major rating agencies give JPMorgan's holding company?",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "Moody’s Investors Service | A1 | P-1 | Stable", "block_index": 837, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "Standard & Poor’s | A | A-1 | Stable", "block_index": 837, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "Fitch Ratings | AA- | F1+ | Stable", "block_index": 837, "section": null}
+      ]
+    },
+    {
+      "id": "h-jpm-dividend-declared-september",
+      "query": "What quarterly common stock dividend did JPMorgan declare in September 2026?",
+      "kind": "direct",
+      "topic": "mda",
+      "asks_for_amount": true,
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "declared a quarterly common stock dividend of $1.65 per share, payable on October 31, 2026, an increase from the prior dividend of $1.50 per share", "block_index": 684, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "Cash dividends declared per share | 1.65 | 1.50", "block_index": 28, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "Common stock dividends ($1.65 and $1.50 per share", "block_index": 1220, "section": null}
+      ]
+    },
+    {
+      "id": "h-jpm-litigation-loss-range",
+      "query": "Beyond what it has already set aside, how much more could JPMorgan plausibly lose from its lawsuits?",
+      "kind": "paraphrase",
+      "topic": "accounting",
+      "asks_for_amount": true,
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "The Firm estimates the aggregate range of reasonably possible losses, in excess of reserves established, for its legal proceedings is from $0 to approximately $1.3 billion at September 30, 2026.", "block_index": 2121, "section": null}
+      ]
+    },
+    {
+      "id": "h-jpm-goodwill-impairment-test",
+      "query": "When does JPMorgan test goodwill for impairment, and was goodwill impaired as of September 30, 2026?",
+      "kind": "direct",
+      "topic": "accounting",
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "Goodwill is tested for impairment during the fourth quarter of each fiscal year", "block_index": 1950, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "the Firm has concluded that goodwill was not impaired as of September 30, 2026 or December 31, 2025", "block_index": 1952, "section": null}
+      ]
+    },
+    {
+      "id": "h-jpm-deposit-growth-sources",
+      "query": "Did customers keep more money at JPMorgan in the third quarter of 2026, and where did the growth come from?",
+      "kind": "paraphrase",
+      "topic": "mda",
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "Firmwide average deposits of $2.7 trillion were up 8%, reflecting:", "block_index": 73, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "–net inflows primarily in Payments,", "block_index": 74, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "–growth in new accounts in Corporate related to the Firm's international consumer initiatives", "block_index": 75, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "–growth in new accounts in CCB, and", "block_index": 76, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "–growth in both new accounts and balances in existing accounts in AWM.", "block_index": 77, "section": null}
+      ]
+    },
+    {
+      "id": "h-unanswerable-apple-store-count",
+      "query": "How many retail stores did Apple operate at the end of fiscal 2026?",
+      "kind": "unanswerable",
+      "topic": "unanswerable"
+    },
+    {
+      "id": "h-unanswerable-apple-december-guidance",
+      "query": "What net sales guidance did Apple give for its December 2026 quarter?",
+      "kind": "unanswerable",
+      "topic": "unanswerable"
+    },
+    {
+      "id": "h-unanswerable-jpm-cet1-year-end-2026",
+      "query": "What was JPMorgan's CET1 capital ratio at December 31, 2026?",
+      "kind": "unanswerable",
+      "topic": "unanswerable"
+    },
+    {
+      "id": "h-unanswerable-jpm-emissions",
+      "query": "What were JPMorgan's operational greenhouse gas emissions in 2026?",
+      "kind": "unanswerable",
+      "topic": "unanswerable"
+    }
+  ],
+  "changelog": [
+    {"dataset_version": "1", "date": "2026-11-13", "change": "Held-out dataset for comparing BM25, semantic and hybrid retrieval: 40 questions (16 direct, 20 paraphrase, 4 unanswerable) over the three filings pinned in retrieval_v1. Questions and evidence written by reading the extracted filing text; no retrieval of any kind was run on these questions. Snippets are unique within their labeled block; repeated disclosures are labeled in every block that supports the question."}
+  ]
+}

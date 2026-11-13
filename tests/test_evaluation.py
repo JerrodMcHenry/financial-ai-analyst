@@ -527,17 +527,24 @@ def test_cli_exits_2_on_integrity_failure(tmp_path, capsys):
     assert "no valid cached copy" in capsys.readouterr().err
 
 
-# --- The real dataset (schema only; its filings are in the local cache, not in the repo) ---
+# --- The real datasets (schema only; their filings are in the local cache, not in the repo) ---
 
-REAL_DATASET = Path(__file__).parent.parent / "evals" / "retrieval_v1.json"
+EVALS = Path(__file__).parent.parent / "evals"
+REAL_DATASET = EVALS / "retrieval_v1.json"
+HELDOUT_DATASET = EVALS / "retrieval_v2_heldout.json"
 
 
-def test_real_dataset_shape():
-    dataset, _ = load_dataset(REAL_DATASET)  # strict schema and cross-references
+@pytest.mark.parametrize(
+    ("path", "counts"),
+    [(REAL_DATASET, [13, 5, 2]), (HELDOUT_DATASET, [16, 20, 4])],
+    ids=["retrieval_v1", "retrieval_v2_heldout"],
+)
+def test_real_dataset_shape(path, counts):
+    dataset, _ = load_dataset(path)  # strict schema and cross-references
     assert len(dataset.documents) == 3
-    assert len(dataset.questions) == 20
+    assert len(dataset.questions) == sum(counts)
     kinds = [q.kind for q in dataset.questions]
-    assert [kinds.count(k) for k in ("direct", "paraphrase", "unanswerable")] == [13, 5, 2]
+    assert [kinds.count(k) for k in ("direct", "paraphrase", "unanswerable")] == counts
     ids = [q.id for q in dataset.questions]
     assert len(set(ids)) == len(ids)
     keys = {d.key for d in dataset.documents}
@@ -549,3 +556,19 @@ def test_real_dataset_shape():
         assert question.topic in {"risk", "mda", "business", "accounting", "unanswerable"}
         if question.kind == "unanswerable":
             assert not question.evidence and not question.expected_sections, question.id
+
+
+def test_heldout_dataset_is_separate_from_retrieval_v1():
+    heldout, _ = load_dataset(HELDOUT_DATASET)
+    development, _ = load_dataset(REAL_DATASET)
+    # Same pinned corpus, so results are comparable...
+    assert heldout.documents == development.documents
+    # ...but no shared question ids, queries or evidence blocks.
+    assert not {q.id for q in heldout.questions} & {q.id for q in development.questions}
+    queries = {q.query.casefold() for q in development.questions}
+    assert not {q.query.casefold() for q in heldout.questions} & queries
+
+    def blocks(dataset):
+        return {(e.document, e.block_index) for q in dataset.questions for e in q.evidence}
+
+    assert not blocks(heldout) & blocks(development)
