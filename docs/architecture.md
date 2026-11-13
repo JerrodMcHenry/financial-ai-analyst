@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.2 implemented** (owner-approved; M2.2 accepted after its correctness review). Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.3 implemented** (owner-approved). Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-12
 
 ---
@@ -332,7 +332,7 @@ company_facts.select_fact(facts, taxonomy, concept, unit, period_start, period_e
 
 ### 3.2e Milestone 2.2: passages and verifiable citations (implemented)
 
-`passages.py` turns an `ExtractedFiling` into passages and verifies citations to them. It is pure and offline. There is no index, ranking or storage yet (M2.3).
+`passages.py` turns an `ExtractedFiling` into passages and verifies citations to them. It is pure and offline. Ranking is in `retrieval.py` (§3.2f); nothing is stored.
 
 ```
 ExtractedFiling.blocks
@@ -416,7 +416,77 @@ Guarantees:
 - **Offsets are Python string (code point) indexes** into normalized block text, not bytes, UTF-16 units (JavaScript) or the raw HTML. A hard cut (2,000 characters without a space) can fall inside a multi-code-point sequence such as an emoji with modifiers; the slices are still exact and verifiable.
 - **Only 10-K/10-Q passages can be verified,** because the filing cache stores only those forms. Passages built from any other form report `source_unavailable`.
 - **Offsets index normalized block text,** not the raw HTML. Locating text in the source goes through each block's `dom_path`/`element_id` (§3.2b).
-- **No section filter or search yet:** the M2.1 constraint (filters return only labeled passages, never unrelated ones) is for M2.3. Passages already carry `section=None` honestly.
+- **Section filters** are implemented in M2.3 (§3.2f) and follow the M2.1 constraint: only labeled passages, never unrelated ones.
+
+### 3.2f Milestone 2.3: keyword retrieval (implemented)
+
+`retrieval.py` ranks passages (§3.2e) with BM25, in memory, with no dependencies. It also chooses the latest 10-K or 10-Q from a company's submissions.
+
+```
+latest FilingRef (select_latest_filing) → fetch_filing_document → extract_filing → build_passages
+  passages from one or more filings → KeywordIndex(passages)       statistics computed once
+  index.search(query, k, section=, form=, accession_number=)
+    tokenize(query) → distinct terms → filter → BM25 score → sort → top k
+  ← list[SearchHit(passage, score, matched_terms, citation_id)]
+```
+
+**Tokenization** (`tokenize`, the same for passages and queries):
+1. Unicode NFKC normalization (full-width characters, ligatures such as "ﬁ", non-breaking spaces), then casefold.
+2. Tokens are runs of letters or digits in any script. Everything else separates tokens, so `single-source` gives `single`, `source`, and `10-K` gives `10`, `k`. A query written either way matches.
+3. Numbers keep a decimal point and drop thousands separators: `$416,161` gives `416161`, `3.5%` gives `3.5`.
+4. A possessive `'s` is dropped (`Apple's` gives `apple`), and other apostrophes are removed (`don't` gives `dont`). Curly apostrophes count.
+5. 28 stopwords are removed: a, an, and, are, as, at, be, by, for, from, has, have, in, is, it, its, of, on, or, that, the, this, to, was, were, which, will, with. Words such as "not", "no" and "may" are kept.
+6. **No stemming and no synonyms:** "supplier" and "suppliers" are different terms.
+
+**BM25** (Okapi BM25, k1 = 1.2, b = 0.75, the usual defaults):
+
+```
+score(P, Q) = Σ over distinct terms t of Q that occur in P:
+              idf(t) · tf(t,P) · (k1 + 1) / (tf(t,P) + k1 · (1 − b + b · |P| / avg|P|))
+idf(t)      = ln(1 + (N − df(t) + 0.5) / (df(t) + 0.5))
+```
+
+- `tf` is the term's count in the passage, `|P|` the passage's token count, `avg|P|` the average over the index, `N` the number of passages, `df` the number of passages containing the term.
+- This IDF variant (as in Lucene) is always positive, so a term that occurs in most passages adds little but never subtracts.
+- **Repeated query terms count once:** "supply supply chain" scores exactly like "supply chain". Terms are summed in sorted order, so word order can't change a score even in the last floating-point digit.
+- Statistics (`N`, `df`, `avg|P|`, lengths and postings) are computed once in `KeywordIndex.__init__`. The index is immutable; adding filings means building a new index.
+
+**Search behavior.**
+- Returns at most `k` hits, best first. **Only passages that contain at least one query term are returned,** never zero-score padding, so there can be fewer than `k` hits or none.
+- A query with no tokens left after tokenization (empty, punctuation only, stopwords only) returns `[]`.
+- `k` must be a positive integer. Anything else, including `True` and `1.5`, raises `ValueError`.
+- An index can't contain the same passage twice (a duplicate `citation_id` raises `ValueError`).
+- `SearchHit.passage` is the indexed `Passage` itself, so its source, filing metadata, section, range and `citation_id` are unchanged. `SearchHit.citation_id` repeats it, and `verify_citation` accepts a hit exactly as it accepts the passage.
+- `matched_terms` lists the distinct query terms the passage contains, sorted. It explains every score.
+
+**Filtering policy.**
+- Filters are exact matches: `section` on `Passage.section`, `form` on the filing's form (`"10-K"` doesn't match `"10-K/A"`), `accession_number` on the filing's accession. They combine with AND.
+- `None` means "don't filter". It never means "unlabeled": there is no way to ask for `section=None` passages specifically.
+- **Filters are applied before ranking, and corpus statistics always describe the whole index.** A passage's score for a query is the same with or without filters, so filtering never reorders the passages it keeps. Recomputing statistics per filter would make scores depend on the filter and cost a pass over the corpus per query.
+- **A section filter is never broadened** (the M2.1 constraint, §3.2b). It returns only passages with exactly that label, so for an unlabeled filing (such as JPMorgan's 10-Q) it returns nothing. `"Item 1A"` doesn't match `"Part II, Item 1A"`, and case matters.
+- A filing whose passages all have `section=None` is fully searchable without a section filter, alone (by accession) or together with other filings.
+
+**Tie-breaking.** Equal scores are ordered by document identity, then location: CIK, accession number, primary document, source SHA-256, extractor version, builder version, `block_start`, `char_start`. That is a total order over distinct passages, so the result doesn't depend on the order passages were added.
+
+**Filing selection** (`select_latest_filing(submissions, form="10-K", include_amendments=False)`):
+- `form` must be `"10-K"` or `"10-Q"`. Amendments (`/A`) are excluded unless `include_amendments=True`.
+- The latest is chosen by `filing_date`, the date the filing was made. It never uses `report_date` or fiscal-year labels.
+- Same-day ties go to the later `acceptance_datetime` (a missing one counts as earliest), then the larger accession number.
+- **It selects only from the filings present in the given `CompanySubmissions`** (its `recent_filings`). It never fetches older submissions pages, so it doesn't guarantee completeness across them (R12). The result is the latest matching filing *in that list*; when `has_more_filings` is true, unrequested older pages aren't considered.
+- Returns `None` when the list has no matching filing. That doesn't prove the company never filed that form.
+
+**Tradeoffs.**
+- **Why BM25 first:** deterministic, explainable (scores come from visible matched terms), no dependencies, fast enough in memory for tens of thousands of passages, and a fixed baseline for later comparisons.
+- **What it misses:** vocabulary mismatch. "Single-source suppliers" won't find "dependence on a limited number of vendors". No stemming means "supplier" doesn't match "suppliers". These are the cases that might later justify a plural rule or hybrid retrieval with embeddings, **but only if evaluation shows it** (M2.4).
+
+**Known limitations.**
+- **In memory only:** the index is rebuilt in each process from cached documents, and nothing is persisted.
+- **No phrases or proximity:** "supply chain" matches passages containing both words anywhere.
+- **Tokenization quirks:** scripts written without spaces (Chinese, Japanese) become one token per run, so they effectively need exact matches. Comma-separated numbers without spaces join (`1,2,3` gives `123`). Version-like strings split oddly (`v1.2.3` gives `v1`, `2.3`).
+- **Noise in passages:** page footers and tables (§3.2e) are indexed like prose. A table of numbers can match a numeric query, but a number found this way is text-sourced and never an input to calculations (§7).
+- **Heading context isn't indexed separately:** a continuation passage doesn't carry its section heading's words.
+- **Scores are comparable only within one index.**
+- **Not evaluated yet.** Relevance is unmeasured. M2.4 must measure Recall@5 and MRR@10 on a reviewed question set with expected snippets and sections, pinned to source SHA-256s and versions, and report section-filter precision and the verification rate of returned citations.
 
 ### 3.3 Later milestone: ingestion
 
@@ -449,7 +519,7 @@ POST /research {question}
 
 ## 4. Directory structure
 
-### 4.1 Current structure (Milestone 2.2)
+### 4.1 Current structure (Milestone 2.3)
 
 ```
 enterprise-financial-ai-analyst/
@@ -472,6 +542,7 @@ enterprise-financial-ai-analyst/
 │       ├── filing_extractor.py # extract_filing: HTML → ordered blocks, sections, diagnostics
 │       ├── filing_cache.py     # filesystem cache for FilingDocuments (fetch / load / save)
 │       ├── passages.py         # build_passages, citation ids, offline verify_citation
+│       ├── retrieval.py        # tokenize, KeywordIndex (BM25), select_latest_filing
 │       └── company_facts.py    # XBRL fact period classification and observation selection
 └── tests/
     ├── conftest.py             # shared settings fixture
@@ -486,6 +557,7 @@ enterprise-financial-ai-analyst/
     ├── test_filing_extractor.py
     ├── test_health.py
     ├── test_passages.py
+    ├── test_retrieval.py
     └── test_sec_client.py
 ```
 
@@ -682,7 +754,7 @@ Environment and lockfile management uses **`uv`** (already installed). It can in
 
 ---
 
-## 10. Deferred and out of scope (as of Milestone 2.2)
+## 10. Deferred and out of scope (as of Milestone 2.3)
 
 **Explicitly deferred:**
 - Older submission pages (R12).

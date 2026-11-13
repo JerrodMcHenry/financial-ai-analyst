@@ -251,3 +251,29 @@ Improved detection for that format is deliberately not implemented in M2.1.
   - A valid entry with a different hash gives `source_changed`.
   - One defect was fixed: the `source_unavailable` detail said "not in the local cache" even for a damaged entry; it now says "missing or failed its integrity checks". No status or cache behavior changed.
 - **Offsets:** every passage segment is an exact slice of its block's text, and the slices cover each block with at most one space left out per cut. Tested with Unicode punctuation and characters, collapsed and non-breaking spaces, abbreviations, long paragraphs, multi-block passages, and sentence ends and spaces at exactly 2,000 and 2,001 characters. Split passages verify through the real cache. A 400-document random check found no mismatches. No offset defects were found.
+
+## D-025 In-memory BM25 keyword retrieval with whole-index statistics
+**Status:** Accepted (owner-approved M2.3, 2026-11-12)
+**Decision:** `retrieval.py` provides `tokenize`, `KeywordIndex` (Okapi BM25, k1 = 1.2, b = 0.75, IDF `ln(1 + (N − df + 0.5)/(df + 0.5))`), `SearchHit` and `select_latest_filing` (architecture §3.2f).
+- **Tokenization:** NFKC and casefold; letter/digit runs in any script; hyphens and other punctuation split; thousands separators dropped and decimal points kept; possessive `'s` dropped; 28 stopwords; no stemming or synonyms.
+- **Query terms are distinct:** a repeated query word counts once.
+- **Statistics describe the whole index** and are computed once. Filters (`section`, `form`, `accession_number`; exact, combined with AND) only restrict which passages may be returned, before ranking.
+- **Section filters are never broadened:** an exact label only; `None` means no filter, never "unlabeled".
+- **No zero-score results:** only passages containing a query term are returned. An empty or stopword-only query returns `[]`; an invalid `k` raises `ValueError`.
+- **Ties** are broken by CIK, accession, primary document, source SHA-256, versions, then `block_start` and `char_start`.
+- **Latest filing** by `filing_date`, then acceptance time, then accession; amendments excluded by default; never by report date or fiscal labels. It selects only from the filings present in the given `CompanySubmissions` (`recent_filings`). It doesn't fetch older submissions pages and doesn't guarantee completeness across them (R12).
+
+**Why:**
+- BM25 is the standard lexical baseline: deterministic, explainable through matched terms, and dependency-free. It gives M2.4 a fixed baseline before anything probabilistic is added.
+- Whole-index statistics make a passage's score independent of filters, so a filtered search is exactly the unfiltered ranking restricted to the filter, and statistics are built once.
+- Counting query terms once keeps verbose or repetitive queries (for example LLM-generated ones) from overweighting a word.
+- No stemming keeps matches literal and predictable; M2.4 will show whether a minimal plural rule is worth it.
+- A total tie-break order makes results independent of insertion order.
+
+**Alternatives:**
+- SQLite FTS5: deferred until the index needs to survive restarts; it adds a database file, and its availability depends on how Python was built.
+- Postgres full-text search: belongs with the database milestone.
+- Embeddings or hybrid retrieval: only if M2.4 shows recall below target, mainly from vocabulary mismatch; never embeddings alone.
+- Per-filter statistics: rejected, because scores would depend on the filter and need a corpus pass per query.
+- Weighting repeated query terms (query term frequency): rejected for now; explicit repetition is rare in analyst queries and easy to abuse.
+- Falling back to unlabeled passages when a section filter matches nothing: rejected by the M2.1 constraint.

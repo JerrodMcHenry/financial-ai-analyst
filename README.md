@@ -2,8 +2,9 @@
 
 Enterprise Financial AI Analyst: a financial research copilot over public-company SEC filings.
 
-**Status:** Milestone 2.2. SEC filing retrieval, caching and extraction, XBRL Company Facts,
-and deterministic passages with offline-verifiable citations. Search and the LLM come later. See [docs/architecture.md](docs/architecture.md) and
+**Status:** Milestone 2.3. SEC filing retrieval, caching and extraction, XBRL Company Facts,
+deterministic passages with offline-verifiable citations, and in-memory BM25 keyword search.
+Evaluation and the LLM come later. See [docs/architecture.md](docs/architecture.md) and
 [docs/decisions.md](docs/decisions.md).
 
 ## Requirements
@@ -137,6 +138,29 @@ or the reason the citation no longer holds: `invalid_citation`, `source_unavaila
 `source_changed`, `extractor_changed`, `builder_changed`, `boundaries_changed` or
 `text_changed`. A citation is never re-pointed to other text. Details:
 [docs/architecture.md](docs/architecture.md) §3.2e.
+
+## Keyword search
+
+```python
+from financial_analyst.retrieval import KeywordIndex, select_latest_filing
+
+ten_k = select_latest_filing(submissions, "10-K")  # by filing date, amendments excluded,
+# chosen only from the filings in `submissions` (older SEC pages aren't fetched)
+# ... fetch_filing_document, extract_filing, build_passages as above, for one or more filings
+index = KeywordIndex(passages)
+for hit in index.search("supply chain suppliers", k=5, section="Item 1A"):
+    print(round(hit.score, 2), hit.matched_terms, hit.citation_id)
+```
+
+`KeywordIndex` ranks passages with Okapi BM25 (k1 = 1.2, b = 0.75), in memory and without
+dependencies. Tokenization lowercases and normalizes Unicode, splits hyphenated words, drops
+thousands separators and a short stopword list, and does no stemming. Repeated query words count
+once, only passages that match at least one word are returned, and equal scores are ordered by
+filing and position. Filters (`section`, `form`, `accession_number`) are exact: a section filter
+returns only passages with exactly that label, so it returns nothing for a filing without
+section labels. Without a section filter, every filing is searchable. Each hit carries the
+unchanged passage and its citation id, ready for `verify_citation`. Details and limitations:
+[docs/architecture.md](docs/architecture.md) §3.2f.
 
 ## XBRL Company Facts
 
