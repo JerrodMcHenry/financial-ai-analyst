@@ -87,7 +87,7 @@ class Evidence(_Strict):
     """An exact span of one extracted block, found by reading the filing (not by search)."""
 
     document: str  # EvalDocument.key
-    snippet: str = Field(min_length=MIN_SNIPPET_CHARS)  # must occur exactly once in the filing
+    snippet: str = Field(min_length=MIN_SNIPPET_CHARS)  # must occur exactly once in the block
     block_index: int = Field(ge=0)
     section: str | None  # the block's section label, as extracted
 
@@ -185,17 +185,29 @@ class ResolvedEvidence(BaseModel):
 def resolve_evidence(
     evidence: Evidence, pin: EvalDocument, extracted: ExtractedFiling
 ) -> ResolvedEvidence:
-    """Locate a labeled span. Raises ValueError unless the snippet occurs exactly once in
-    the whole filing, in the labeled block, and that block has the labeled section."""
-    occurrences = sum(block.text.count(evidence.snippet) for block in extracted.blocks)
-    if occurrences != 1:
-        raise ValueError(f"snippet occurs {occurrences} times in {pin.key}, not once")
+    """Locate a labeled span. Raises ValueError unless the label names this document, the
+    extracted text is from the pinned bytes, the labeled block exists, the snippet occurs
+    exactly once in that block, and the block has the labeled section.
+
+    Uniqueness is checked within the block, not the filing: the block index already says
+    which occurrence is meant, so a disclosure repeated in another block (a summary and a
+    note, say) can be labeled in each place independently.
+    """
+    if evidence.document != pin.key:
+        raise ValueError(f"evidence for {evidence.document} resolved against {pin.key}")
+    if extracted.source.content_sha256 != pin.content_sha256:
+        raise ValueError(f"extracted text of {pin.key} is not from the pinned SHA-256")
     if evidence.block_index >= len(extracted.blocks):
         raise ValueError(f"block {evidence.block_index} does not exist in {pin.key}")
     block = extracted.blocks[evidence.block_index]
     start = block.text.find(evidence.snippet)
     if start == -1:
         raise ValueError(f"snippet is not in block {evidence.block_index} of {pin.key}")
+    # Searching again from start + 1 also catches overlapping repeats, which count() misses.
+    if block.text.find(evidence.snippet, start + 1) != -1:
+        raise ValueError(
+            f"snippet occurs more than once in block {evidence.block_index} of {pin.key}"
+        )
     if block.section != evidence.section:
         raise ValueError(
             f"block {evidence.block_index} of {pin.key} has section {block.section!r}, "

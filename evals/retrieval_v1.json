@@ -1,0 +1,276 @@
+{
+  "dataset_version": "1",
+  "documents": [
+    {
+      "key": "aapl-10k-2026",
+      "cik": "0000320193",
+      "accession_number": "0000320193-26-000026",
+      "form": "10-K",
+      "primary_document": "aapl-20260926.htm",
+      "filing_date": "2026-11-03",
+      "content_sha256": "ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231",
+      "extractor_version": "2",
+      "builder_version": "1"
+    },
+    {
+      "key": "aapl-10q-2026-06",
+      "cik": "0000320193",
+      "accession_number": "0000320193-26-000020",
+      "form": "10-Q",
+      "primary_document": "aapl-20260627.htm",
+      "filing_date": "2026-07-31",
+      "content_sha256": "ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5",
+      "extractor_version": "2",
+      "builder_version": "1"
+    },
+    {
+      "key": "jpm-10q-2026-09",
+      "cik": "0000019617",
+      "accession_number": "0001628280-26-069523",
+      "form": "10-Q",
+      "primary_document": "jpm-20260930.htm",
+      "filing_date": "2026-11-03",
+      "content_sha256": "2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b",
+      "extractor_version": "2",
+      "builder_version": "1"
+    }
+  ],
+  "questions": [
+    {
+      "id": "aapl-10k-segments",
+      "query": "What are Apple's reportable segments?",
+      "kind": "direct",
+      "topic": "business",
+      "expected_sections": [
+        {"document": "aapl-10k-2026", "section": "Item 1"},
+        {"document": "aapl-10k-2026", "section": "Item 8"}
+      ],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "The Company’s reportable segments consist of the Americas, Europe, Greater China, Japan and Rest of Asia Pacific.", "block_index": 75, "section": "Item 1"},
+        {"document": "aapl-10k-2026", "snippet": "The Company’s reportable segments consist of the Americas, Europe, Greater China, Japan and Rest of Asia Pacific.", "block_index": 618, "section": "Item 8"}
+      ],
+      "filtered_searches": [{"section": "Item 1", "document": "aapl-10k-2026"}]
+    },
+    {
+      "id": "aapl-10k-cybersecurity-risk",
+      "query": "What cybersecurity risks does Apple describe in its risk factors?",
+      "kind": "direct",
+      "topic": "risk",
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 1A"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "The Company experiences malicious attacks and other attempts to gain unauthorized access to its systems on a regular basis.", "block_index": 176, "section": "Item 1A"},
+        {"document": "aapl-10k-2026", "snippet": "artificial intelligence technologies are producing highly targeted phishing campaigns", "block_index": 177, "section": "Item 1A"}
+      ],
+      "filtered_searches": [{"section": "Item 1A", "document": "aapl-10k-2026"}]
+    },
+    {
+      "id": "aapl-10k-products-gross-margin",
+      "query": "Why did Apple's products gross margin increase in fiscal 2026?",
+      "kind": "direct",
+      "topic": "mda",
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 7"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "Products gross margin and gross margin percentage increased during 2026 compared to 2025 primarily due to product mix and tariff refunds, partially offset by higher costs, including memory.", "block_index": 342, "section": "Item 7"}
+      ],
+      "filtered_searches": [{"section": "Item 7", "document": "aapl-10k-2026"}]
+    },
+    {
+      "id": "aapl-10k-capital-return",
+      "query": "How much did Apple spend on share repurchases and dividends in fiscal 2026?",
+      "kind": "direct",
+      "topic": "mda",
+      "asks_for_amount": true,
+      "expected_sections": [
+        {"document": "aapl-10k-2026", "section": "Item 7"},
+        {"document": "aapl-10k-2026", "section": "Item 8"}
+      ],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "During 2026, the Company repurchased $85.8 billion of its common stock and paid dividends and dividend equivalents of $15.7 billion.", "block_index": 373, "section": "Item 7"},
+        {"document": "aapl-10k-2026", "snippet": "During 2026, the Company repurchased 297 million shares of its common stock for $85.8 billion.", "block_index": 586, "section": "Item 8"}
+      ]
+    },
+    {
+      "id": "aapl-10k-revenue-recognition",
+      "query": "When does Apple recognize revenue for products and for services?",
+      "kind": "direct",
+      "topic": "accounting",
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 8"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "For most of the Company’s Products net sales, control transfers when products are shipped. For the Company’s Services net sales, control transfers over time as services are delivered.", "block_index": 464, "section": "Item 8"}
+      ]
+    },
+    {
+      "id": "aapl-10k-state-aid",
+      "query": "What was the outcome of the European Commission State Aid Decision against Apple, and what charge did Apple record?",
+      "kind": "direct",
+      "topic": "accounting",
+      "asks_for_amount": true,
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 8"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "the ECJ announced that it had set aside the 2020 judgment of the General Court and confirmed the Commission’s 2016 State Aid Decision", "block_index": 533, "section": "Item 8"},
+        {"document": "aapl-10k-2026", "snippet": "the Company recorded a one-time income tax charge of $10.2 billion, net", "block_index": 533, "section": "Item 8"}
+      ]
+    },
+    {
+      "id": "aapl-10k-critical-estimates",
+      "query": "Which critical accounting estimates does Apple discuss in its annual report?",
+      "kind": "direct",
+      "topic": "accounting",
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 7"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "The evaluation of the Company’s uncertain tax positions involves significant judgment", "block_index": 383, "section": "Item 7"},
+        {"document": "aapl-10k-2026", "snippet": "The Company records a liability when it is probable a loss has been incurred and the amount is reasonably estimable", "block_index": 385, "section": "Item 7"}
+      ]
+    },
+    {
+      "id": "aapl-10k-geopolitical-paraphrase",
+      "query": "Could political turmoil or conflicts between countries hurt Apple's business?",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "expected_sections": [{"document": "aapl-10k-2026", "section": "Item 1A"}],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "The Company’s business can be impacted by political events, trade and other international disputes, geopolitical tensions, conflict, terrorism, natural disasters, public health issues, industrial accidents and other business interruptions.", "block_index": 115, "section": "Item 1A"},
+        {"document": "aapl-10k-2026", "snippet": "Political events, trade and other international disputes, geopolitical tensions, conflict, terrorism, natural disasters, public health issues, industrial accidents and other business interruptions can have a material adverse effect on the Company", "block_index": 116, "section": "Item 1A"}
+      ]
+    },
+    {
+      "id": "aapl-seasonality-paraphrase",
+      "query": "At what time of year does Apple usually sell the most?",
+      "kind": "paraphrase",
+      "topic": "business",
+      "expected_sections": [
+        {"document": "aapl-10k-2026", "section": "Item 1"},
+        {"document": "aapl-10q-2026-06", "section": "Part I, Item 2"}
+      ],
+      "evidence": [
+        {"document": "aapl-10k-2026", "snippet": "The Company has historically experienced higher net sales in its first quarter compared to other quarters in its fiscal year due in part to seasonal holiday demand.", "block_index": 96, "section": "Item 1"},
+        {"document": "aapl-10q-2026-06", "snippet": "The Company has historically experienced higher net sales in its first quarter compared to other quarters in its fiscal year due in part to seasonal holiday demand.", "block_index": 152, "section": "Part I, Item 2"}
+      ]
+    },
+    {
+      "id": "aapl-10q-risk-factor-updates",
+      "query": "What risk-factor updates did Apple disclose in its Form 10-Q for the fiscal quarter ended June 27, 2026?",
+      "kind": "direct",
+      "topic": "risk",
+      "expected_sections": [{"document": "aapl-10q-2026-06", "section": "Part II, Item 1A"}],
+      "evidence": [
+        {"document": "aapl-10q-2026-06", "snippet": "Except for the risk factors set forth below and those disclosed in Part II, Item 1A of the second quarter 2026 Form 10-Q, which are incorporated by reference herein, there have been no material changes to the Company’s risk factors since the 2025 Form 10-K.", "block_index": 254, "section": "Part II, Item 1A"},
+        {"document": "aapl-10q-2026-06", "snippet": "Future operating results depend upon the Company’s ability to obtain components and computing resources in sufficient quantities and on commercially reasonable terms.", "block_index": 255, "section": "Part II, Item 1A"},
+        {"document": "aapl-10q-2026-06", "snippet": "The Company’s future performance depends in part on support from third-party software developers.", "block_index": 259, "section": "Part II, Item 1A"},
+        {"document": "aapl-10q-2026-06", "snippet": "The technology industry, including, in some instances, the Company, is subject to intense media, political and regulatory scrutiny, which exposes the Company to increasing regulation, government investigations, legal actions and penalties.", "block_index": 266, "section": "Part II, Item 1A"},
+        {"document": "aapl-10q-2026-06", "snippet": "The Company’s business is subject to a variety of U.S. and international laws, rules, policies and other obligations regarding the collection, use, protection and transfer of personal data.", "block_index": 274, "section": "Part II, Item 1A"}
+      ],
+      "filtered_searches": [{"section": "Part II, Item 1A", "document": "aapl-10q-2026-06"}]
+    },
+    {
+      "id": "aapl-10q-deemed-repatriation-tax",
+      "query": "How much deemed repatriation tax did Apple pay during the first nine months of fiscal 2026?",
+      "kind": "direct",
+      "topic": "mda",
+      "asks_for_amount": true,
+      "expected_sections": [{"document": "aapl-10q-2026-06", "section": "Part I, Item 2"}],
+      "evidence": [
+        {"document": "aapl-10q-2026-06", "snippet": "During the first nine months of 2026, the Company paid the remaining $8.8 billion balance of the deemed repatriation tax payable imposed by the U.S. Tax Cuts and Jobs Act of 2017.", "block_index": 220, "section": "Part I, Item 2"}
+      ],
+      "filtered_searches": [{"section": "Part I, Item 2", "document": "aapl-10q-2026-06"}]
+    },
+    {
+      "id": "aapl-10q-compute-paraphrase",
+      "query": "Did Apple's quarterly report for the period ended June 27, 2026 warn that it might not secure enough computing power for its AI features?",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "expected_sections": [{"document": "aapl-10q-2026-06", "section": "Part II, Item 1A"}],
+      "evidence": [
+        {"document": "aapl-10q-2026-06", "snippet": "If the Company is unable to obtain adequate compute capacity in a timely manner or at commercially reasonable rates, this can limit the functionality and availability of its products and services", "block_index": 258, "section": "Part II, Item 1A"}
+      ]
+    },
+    {
+      "id": "jpm-provision-credit-losses",
+      "query": "What was JPMorgan's provision for credit losses in the third quarter of 2026, and how much did it add to the allowance for credit losses?",
+      "kind": "direct",
+      "topic": "mda",
+      "asks_for_amount": true,
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "The provision for credit losses was $2.7 billion. Net charge-offs were $2.2 billion, down $389 million, driven by wholesale. The net addition to the allowance for credit losses was $539 million, primarily in wholesale.", "block_index": 63, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "Net charge-offs were $2.2 billion and the net addition to the allowance for credit losses was $539 million.", "block_index": 182, "section": null}
+      ],
+      "filtered_searches": [
+        {"section": "Part I, Item 2", "document": "jpm-10q-2026-09", "expect_empty": true},
+        {"document": "jpm-10q-2026-09"}
+      ]
+    },
+    {
+      "id": "jpm-net-interest-income",
+      "query": "What drove JPMorgan's net interest income in the third quarter of 2026?",
+      "kind": "direct",
+      "topic": "mda",
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "Net interest income (\"NII\") of $27.0 billion, up 13%, driven by higher Markets net interest income, higher deposit balances, higher balances in Card Services, and higher wholesale loan balances,", "block_index": 57, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "partially offset by the impact of lower rates. NII excluding Markets was $24.7 billion, up 6%.", "block_index": 58, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "Net interest income increased driven by higher Markets net interest income, higher deposit balances across the LOBs and Corporate, higher revolving balances in Card Services, and higher wholesale loan balances, partially offset by the impact of lower rates.", "block_index": 147, "section": null}
+      ],
+      "filtered_searches": [{"document": "jpm-10q-2026-09"}]
+    },
+    {
+      "id": "jpm-allowance-macroeconomic-variables",
+      "query": "Which macroeconomic variables drive JPMorgan's allowance for credit losses estimate?",
+      "kind": "direct",
+      "topic": "accounting",
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "with modeled credit losses being driven primarily by a subset of less than twenty variables", "block_index": 1117, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "Key MEVs for the consumer portfolio include regional U.S. unemployment rates and U.S. HPI.", "block_index": 1118, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "Key MEVs for the wholesale portfolio include U.S. unemployment, U.S. real GDP growth rate, U.S. equity prices, U.S. interest rates, U.S. corporate credit spreads, oil prices, U.S. commercial real estate prices and U.S. HPI.", "block_index": 1119, "section": null}
+      ],
+      "filtered_searches": [{"section": "Part I, Item 1", "document": "jpm-10q-2026-09", "expect_empty": true}]
+    },
+    {
+      "id": "jpm-capital-cushion-paraphrase",
+      "query": "Does JPMorgan hold more top-quality capital than its regulators demand?",
+      "kind": "paraphrase",
+      "topic": "mda",
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "CET1 capital was $304 billion, and the Standardized and Advanced CET1 ratios were each 14.0%.", "block_index": 80, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "CET1 capital ratio | 14.0 | % | 14.6 | % | 11.5 | % | 14.0 | % | 14.1 | % | 11.5 | %", "block_index": 636, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "The Firm’s Standardized CET1 capital ratio requirement, including regulatory buffers, was 11.5% as of September 30, 2026.", "block_index": 699, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "JPMorgan Chase & Co. and JPMorgan Chase Bank, N.A. were well-capitalized and met all capital requirements to which each was subject.", "block_index": 2056, "section": null}
+      ]
+    },
+    {
+      "id": "jpm-liquidity-paraphrase",
+      "query": "Does JPMorgan keep enough easy-to-sell assets to get through a month of heavy cash outflows, and did that buffer grow in the third quarter of 2026?",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "maintain an amount of eligible HQLA that is sufficient to meet their respective estimated total net cash outflows over a prospective 30 calendar-day period of significant stress", "block_index": 735, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "The Firm’s average LCR for the three months ended September 30, 2026 increased, compared with the three months ended June 30, 2026", "block_index": 743, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "The Firm’s average LCR for the three months ended September 30, 2026 increased, compared with the three months ended September 30, 2025", "block_index": 744, "section": null}
+      ]
+    },
+    {
+      "id": "jpm-business-segments",
+      "query": "What are JPMorgan's reportable business segments?",
+      "kind": "direct",
+      "topic": "business",
+      "evidence": [
+        {"document": "jpm-10q-2026-09", "snippet": "There are three reportable business segments – Consumer & Community Banking, Commercial & Investment Bank, and Asset & Wealth Management – with the remaining activities in Corporate.", "block_index": 333, "section": null},
+        {"document": "jpm-10q-2026-09", "snippet": "There are three reportable business segments – Consumer & Community Banking, Commercial & Investment Bank, and Asset & Wealth Management – with the remaining activities in Corporate.", "block_index": 2152, "section": null}
+      ],
+      "filtered_searches": [{"document": "jpm-10q-2026-09"}]
+    },
+    {
+      "id": "unanswerable-iphone-units",
+      "query": "How many iPhone units did Apple sell in fiscal 2026?",
+      "kind": "unanswerable",
+      "topic": "unanswerable"
+    },
+    {
+      "id": "unanswerable-oil-gas-reserves",
+      "query": "What were Apple's proved oil and gas reserves at the end of fiscal 2026?",
+      "kind": "unanswerable",
+      "topic": "unanswerable"
+    }
+  ],
+  "changelog": [
+    {"dataset_version": "1", "date": "2026-11-13", "change": "Initial dataset: 20 questions (13 direct, 5 paraphrase, 2 unanswerable) over three pinned filings. Evidence labeled by reading the extracted filing text, without running retrieval. Owner review before the first commit: snippets need only be unique within their block, so repeated disclosures are labeled in every block that supports the question (Apple 10-K block 618; JPMorgan blocks 147, 636 and 2056; Apple 10-K block 115 and JPMorgan blocks 333 and 744 found by re-reading); the Apple DMA-fine question was replaced by a JPMorgan business-segments question; topics normalized to risk, mda, business and accounting; the unanswerable reserves question names Apple and fiscal 2026."}
+  ]
+}

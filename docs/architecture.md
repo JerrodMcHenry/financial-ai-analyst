@@ -1,7 +1,7 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.3 implemented** (owner-approved); **Milestone 2.4 B1 (evaluation harness) implemented, awaiting review**. Sections marked "later" are design intent, not commitments.
-Last updated: 2026-11-12
+Status: **Milestones 0–2.3 implemented** (owner-approved); **Milestone 2.4 B1 (evaluation harness) owner-approved; B3 (real evaluation dataset) awaiting evidence-label review**. Sections marked "later" are design intent, not commitments.
+Last updated: 2026-11-13
 
 ---
 
@@ -488,7 +488,7 @@ idf(t)      = ln(1 + (N − df(t) + 0.5) / (df(t) + 0.5))
 - **Scores are comparable only within one index.**
 - **Not evaluated yet.** Relevance is unmeasured. M2.4 must measure Recall@5 and MRR@10 on a reviewed question set with expected snippets and sections, pinned to source SHA-256s and versions, and report section-filter precision and the verification rate of returned citations.
 
-### 3.2g Milestone 2.4 B1: offline evaluation harness (implemented, awaiting review)
+### 3.2g Milestone 2.4: offline evaluation harness (B1, approved) and real dataset (B3, awaiting review)
 
 `evaluation.py` measures retrieval against **pinned** filings read only from the filing cache. B1 is the harness alone. The real dataset (`evals/retrieval_v1.json`), document acquisition and the baseline run come in B2–B4. M2.4 makes no retrieval improvements.
 
@@ -516,7 +516,7 @@ dataset JSON (pins, questions, evidence spans, changelog) → load_dataset (stri
 **Labels are a reviewed, non-exhaustive evidence set.** They are written by reading the filings, never by consulting BM25 rankings (the B3 procedure: read whole sections; you review every span). Recall is therefore **labeled-evidence recall**, never recall over all evidence a filing might contain.
 
 **Evidence matching.**
-- A span resolves only if its snippet occurs **exactly once in the whole filing**, inside the labeled block, and that block has the labeled section. Labels point at text, not passage ids, so they survive changes to passage boundaries.
+- A span resolves only if the label names the pinned document, the labeled block exists, the snippet occurs **exactly once within that block** (overlapping repeats count), and the block has the labeled section. The block index already says which occurrence is meant, so a disclosure repeated elsewhere in the filing (an MD&A summary and a note, say) is labeled in each block that supports the question. Labels point at text, not passage ids, so they survive changes to passage boundaries.
 - **Relevance:** a passage is relevant to a span if that one passage contains at least **80%** of the span's characters (`RELEVANCE_THRESHOLD`), in the same document (full SHA-256). Overlap is computed from the passage's block/character range. A one-character overlap never counts; a span cut by a passage split may still count if 80% lies in one passage.
 - **Combined coverage** is measured separately: the share of the span's characters contained in the union of the top-five passages. A span reaching 80% only in combination is counted as `split_evidence`, and is not a Hit.
 
@@ -562,7 +562,22 @@ Citation correctness and filter compliance are integrity conditions, not metrics
 - Section precision compares labels exactly and is undefined for sectionless filings, which simply contribute non-matching hits.
 - Timings come from one machine and one run; they aren't benchmarks.
 - A full verification sweep re-extracts each filing once per citation, which may take minutes on real filings.
-- The small question sets (6 answerable in the fixture, 18 planned) make aggregate metrics coarse; read the per-question table.
+- The small question sets (6 answerable in the fixture, 18 in the real dataset) make aggregate metrics coarse; read the per-question table.
+
+**Real dataset (B3, awaiting evidence-label review): `evals/retrieval_v1.json`.**
+- **Pinned corpus.** Three cached filings, accepted by the owner in B2 with their full SHA-256 hashes, `extractor_version` 2 and `builder_version` 1:
+  - Apple 10-K for fiscal 2026, accession 0000320193-26-000026;
+  - Apple 10-Q for the quarter ended June 27, 2026, accession 0000320193-26-000020;
+  - JPMorgan 10-Q for September 30, 2026, accession 0001628280-26-069523. It has no section labels, so all its evidence is `section: null`.
+- **Questions.** 20 in total: 13 direct, 5 paraphrase and 2 unanswerable.
+- **Labeling.** Every evidence span was written by reading the extracted blocks, without building a `KeywordIndex` or looking at rankings. Each span is validated with `resolve_evidence`: it must occur exactly once in the labeled block, under the labeled section. Repeated disclosures were found by reading and exact-text comparison (not search) and are labeled in every block that supports the question.
+- **The local cache is required.** The benchmark is reproducible only from the cached bytes in `data/sec-cache`, which git ignores. The evaluation never downloads; without those exact files it refuses to run. Keep the cache. If it is lost, the corpus must be re-acquired and re-pinned, and every label re-validated.
+- **Raw-byte SHA-256 remains authoritative.** Pins and citation ids hash the exact bytes received, and `verify_citation` compares against them. Nothing is normalized before hashing.
+- **Unresolved provenance observation (B2, 2026-11-13).**
+  - **What was seen:** all three primary documents downloaded in B2 were exactly 12 bytes shorter than in earlier live runs, and all their SHA-256 hashes differed. Accession numbers, forms, dates, URLs and extraction counts were unchanged.
+  - **A possible cause:** each cached file ends with the same `<script>` element, whose path looks like a random token, just before `</body>`. A response-dependent script added outside the filing could explain the difference.
+  - **This is not proven.** The earlier bytes weren't kept, so it is an observation, not an established SEC behavior.
+  - **The practical consequence:** downloading an unchanged filing again may produce different bytes. Its citations would then report `source_changed`.
 
 ### 3.3 Later milestone: ingestion
 

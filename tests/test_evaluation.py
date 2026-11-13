@@ -15,6 +15,7 @@ from financial_analyst import evaluation
 from financial_analyst.evaluation import (
     EvalDataset,
     EvaluationError,
+    Evidence,
     ResolvedEvidence,
     combined_coverage,
     covers,
@@ -23,10 +24,12 @@ from financial_analyst.evaluation import (
     load_dataset,
     main,
     reciprocal_rank,
+    resolve_evidence,
     run_evaluation,
     section_precision,
 )
 from financial_analyst.filing_cache import save_filing_document
+from financial_analyst.filing_extractor import extract_filing
 from financial_analyst.passages import Passage, PassageSource, PassageVerification
 from financial_analyst.retrieval import SearchHit
 from financial_analyst.sec_models import FilingDocument, FilingRef, SourceMetadata
@@ -320,7 +323,7 @@ def test_version_pins_must_match_the_current_code(tmp_path, cache, field, messag
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        ({"snippet": "this text is not in the filing at all"}, "occurs 0 times"),
+        ({"snippet": "this text is not in the filing at all"}, "not in block 5"),
         ({"snippet": "Sample Company Inc. | 2026"}, "not in block 5"),  # exists elsewhere
         ({"block_index": 6}, "not in block 6"),
         ({"block_index": 99}, "block 99 does not exist"),
@@ -333,12 +336,97 @@ def test_unresolvable_evidence_is_refused(tmp_path, cache, change, message):
         run_evaluation(path, cache)
 
 
-def test_ambiguous_snippet_is_refused(tmp_path, cache):
+def extracted_fixture(key: str, content: bytes | None = None):
+    """A pin and the extraction of its fixture (or of `content`), without a cache."""
+    dataset, _ = load_dataset(DATASET)
+    pin = next(d for d in dataset.documents if d.key == key)
+    content = content if content is not None else (FIXTURES / FIXTURE_FILES[key]).read_bytes()
+    sha = hashlib.sha256(content).hexdigest()
+    ref = pin.filing_ref()
+    source = SourceMetadata(
+        source_url=ref.primary_document_url,
+        retrieved_at=datetime(2026, 11, 12, tzinfo=UTC),
+        http_status=200,
+        content_sha256=sha,
+    )
+    document = FilingDocument(filing=ref, content=content, source=source)
+    return pin.model_copy(update={"content_sha256": sha}), extract_filing(document)
+
+
+def test_same_snippet_in_two_blocks_resolves_independently():
     # This prefix occurs in two blocks of the 10-Q fixture (market risk and risk factors).
+    pin, extracted = extracted_fixture("sample-10q")
+    snippet = "There have been no material changes to the"
+    labels = [(10, "Part I, Item 3"), (17, "Part II, Item 1A")]
+    resolved = [
+        resolve_evidence(
+            Evidence(document=pin.key, snippet=snippet, block_index=index, section=section),
+            pin,
+            extracted,
+        )
+        for index, section in labels
+    ]
+    assert [(r.block_index, r.start, r.end) for r in resolved] == [
+        (10, 0, len(snippet)),
+        (17, 0, len(snippet)),
+    ]
+
+
+def test_same_snippet_in_two_blocks_passes_the_runner(tmp_path, cache):
     evidence = {"document": "sample-10q", "snippet": "There have been no material changes to the",
                 "block_index": 17, "section": "Part II, Item 1A"}  # fmt: skip
     path = edited_dataset(tmp_path, lambda d: d["questions"][3].update(evidence=[evidence]))
-    with pytest.raises(EvaluationError, match="occurs 2 times"):
+    report = run_evaluation(path, cache, search_repetitions=1)
+    assert report.questions[3].id == "q-10q-risk-updates"
+
+
+@pytest.mark.parametrize(
+    ("repeated", "snippet"),
+    [
+        ("Revenue grew because demand rose. Revenue grew because demand rose.",
+         "Revenue grew because demand rose."),
+        # Overlapping occurrences at 0 and 3, which str.count would report as one.
+        ("abcabcabcabcabcabcabcabcabc", "abcabcabcabcabcabcabcabc"),
+    ],
+)  # fmt: skip
+def test_snippet_repeated_within_its_block_is_rejected(repeated, snippet):
+    html = f"<html><body><p>Item 1. Business</p><p>{repeated}</p></body></html>"
+    pin, extracted = extracted_fixture("sample-10k", html.encode())
+    block = next(b for b in extracted.blocks if b.text == repeated)
+    evidence = Evidence(
+        document=pin.key, snippet=snippet, block_index=block.index, section=block.section
+    )
+    with pytest.raises(ValueError, match=f"more than once in block {block.index}"):
+        resolve_evidence(evidence, pin, extracted)
+
+
+def test_evidence_for_the_wrong_document_is_rejected():
+    pin, extracted = extracted_fixture("sample-10k")
+    good = Evidence(
+        document="sample-10k",
+        snippet="designs, manufactures and markets smartphones",
+        block_index=5,
+        section="Item 1",
+    )
+    assert resolve_evidence(good, pin, extracted).block_index == 5
+    with pytest.raises(ValueError, match="evidence for sample-10q resolved against sample-10k"):
+        resolve_evidence(good.model_copy(update={"document": "sample-10q"}), pin, extracted)
+    # The pin names other bytes than the ones extracted.
+    other_pin = pin.model_copy(update={"content_sha256": "0" * 64})
+    with pytest.raises(ValueError, match="not from the pinned SHA-256"):
+        resolve_evidence(good, other_pin, extracted)
+    # Another document's extraction, under its own pin: the block holds different text.
+    pin_10q, extracted_10q = extracted_fixture("sample-10q")
+    with pytest.raises(ValueError, match="evidence for sample-10k resolved against sample-10q"):
+        resolve_evidence(good, pin_10q, extracted_10q)
+
+
+def test_evidence_pointing_at_another_document_in_the_dataset_is_refused(tmp_path, cache):
+    # A real 10-K snippet labeled as 10-Q evidence: the 10-Q block doesn't contain it.
+    path = edited_dataset(
+        tmp_path, lambda d: d["questions"][0]["evidence"][0].update(document="sample-10q")
+    )
+    with pytest.raises(EvaluationError, match="q-products evidence 1: snippet is not in block"):
         run_evaluation(path, cache)
 
 
@@ -416,3 +504,27 @@ def test_cli_writes_report_and_summary(tmp_path, cache, capsys):
 def test_cli_exits_2_on_integrity_failure(tmp_path, capsys):
     assert main([str(DATASET), "--cache-dir", str(tmp_path / "empty")]) == 2
     assert "no valid cached copy" in capsys.readouterr().err
+
+
+# --- The real dataset (schema only; its filings are in the local cache, not in the repo) ---
+
+REAL_DATASET = Path(__file__).parent.parent / "evals" / "retrieval_v1.json"
+
+
+def test_real_dataset_shape():
+    dataset, _ = load_dataset(REAL_DATASET)  # strict schema and cross-references
+    assert len(dataset.documents) == 3
+    assert len(dataset.questions) == 20
+    kinds = [q.kind for q in dataset.questions]
+    assert [kinds.count(k) for k in ("direct", "paraphrase", "unanswerable")] == [13, 5, 2]
+    ids = [q.id for q in dataset.questions]
+    assert len(set(ids)) == len(ids)
+    keys = {d.key for d in dataset.documents}
+    for question in dataset.questions:
+        referenced = {e.document for e in question.evidence}
+        referenced |= {s.document for s in question.expected_sections}
+        referenced |= {f.document for f in question.filtered_searches if f.document}
+        assert referenced <= keys, question.id
+        assert question.topic in {"risk", "mda", "business", "accounting", "unanswerable"}
+        if question.kind == "unanswerable":
+            assert not question.evidence and not question.expected_sections, question.id
