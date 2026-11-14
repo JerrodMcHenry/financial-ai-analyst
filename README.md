@@ -2,7 +2,7 @@
 
 Enterprise Financial AI Analyst: a financial research copilot over public-company SEC filings.
 
-**Status:** Milestone 2.5 (B2). SEC filing retrieval, caching and extraction, XBRL Company Facts,
+**Status:** Milestone 2.5 (B3). SEC filing retrieval, caching and extraction, XBRL Company Facts,
 deterministic passages with offline-verifiable citations (verified in batches), in-memory BM25
 keyword search, an offline retrieval-evaluation harness, a real evaluation dataset and its BM25
 baseline. The LLM comes later. See [docs/architecture.md](docs/architecture.md) and
@@ -169,6 +169,18 @@ unchanged passage and its citation id, ready for `verify_citation`. Details and 
 uv run python -m financial_analyst.evaluation DATASET.json --output report.json
 # reads filings from data/sec-cache by default (--cache-dir to change); never contacts SEC
 ```
+
+Semantic and hybrid retrieval (an experiment, D-028/D-029) need the optional extra and a
+one-time, hash-verified model install:
+
+```bash
+uv sync --extra semantic
+uv run python -m financial_analyst.semantic_retrieval install   # pinned BAAI/bge-small-en-v1.5
+uv run python -m financial_analyst.evaluation evals/retrieval_v1.json --retriever hybrid
+```
+
+The model is loaded only from `data/models/` after every file's SHA-256 is checked; searching
+never uses the network. Embedding the corpus on one CPU thread takes several minutes.
 
 The evaluation reads a dataset that pins each filing by its full SHA-256 and the extractor and
 passage-builder versions, and labels evidence as exact text spans written by reading the

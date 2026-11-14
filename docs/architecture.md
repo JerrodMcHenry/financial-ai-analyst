@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.4 implemented** (owner-approved: evaluation harness, real dataset and BM25 baseline); **Milestone 2.5 B1 (batch citation verification) approved; B2 (held-out evaluation dataset) awaiting review**. Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.4 implemented** (owner-approved: evaluation harness, real dataset and BM25 baseline); **Milestone 2.5 B1–B2 approved (batch verification, held-out dataset); B3 (semantic and hybrid retrieval) awaiting review**. Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-13
 
 ---
@@ -607,6 +607,43 @@ Citation correctness and filter compliance are integrity conditions, not metrics
 - **Some spans are table rows,** such as ratings, rate sensitivity and dividends per share. They count as relevant only when a passage holds the row's text, which for tables means the whole table passage.
 - **Unanswerable questions** were checked by pattern search over every block of all three filings. Related but unsupporting text exists on purpose, as a hard negative: JPMorgan's "outlook", climate-risk mentions, December 2025 capital ratios, and mentions of Apple's retail stores without a count.
 - **Small sample:** with 36 answerable questions, one question moves Hit@5 by about 2.8 points.
+
+### 3.2h Milestone 2.5 B3: semantic and hybrid retrieval (experiment, awaiting review)
+
+`semantic_retrieval.py` (optional `semantic` extra) ranks the same `Passage` objects as BM25. Decisions: D-028 (frozen comparison protocol and adoption criteria), D-029 (model, runtime, fusion).
+
+```
+install once (network):  install_model → pinned commit 5c38ec7c… → verify sizes and SHA-256 → data/models/… (git-ignored)
+every load (offline):    verify_model_files → FastEmbed(specific_model_path, CPU, 1 thread) → LocalEmbedder
+index:                   SemanticIndex(passages, embed): one unit-length float32 row per passage (512-token limit)
+search(query, filters):  semantic: cosine over the filtered rows → ties as BM25
+                         hybrid:   BM25 top 50 + semantic top 50 (same filters) → RRF, k = 60 → top k
+→ RankedHit(passage unchanged, score, bm25_rank, semantic_rank) → verify_citations as before
+```
+
+- **Same rules as BM25:** exact filters applied before ranking, never broadened; tie-breaks by document identity, then position; a blank query returns `[]`. Hits are the indexed passages, so citation ids and verification are unchanged.
+- **Inference configuration** (audited against the pinned commit, D-029):
+  - CLS pooling, L2 normalization and lowercase input up to 512 tokens match the model's published configuration.
+  - Queries are embedded **without** the instruction prefix the model card recommends for short-query retrieval. This is a frozen, documented choice and a known limitation, not changed by the audit.
+- **The model is never trusted unverified:** a missing or changed file raises `ModelIntegrityError`, and the evaluation refuses with exit code 2. Only `python -m financial_analyst.semantic_retrieval install` uses the network.
+- **Evaluation:** `--retriever bm25|semantic|hybrid` (default `bm25`, unchanged). Each report records a `retriever` block:
+  - the configuration, model repository, revision, file hash and fingerprint;
+  - the embedding fingerprint;
+  - truncation counts.
+
+  `timings.model_load_ms` is recorded, and `index_build_ms` includes embedding every passage. In BM25 mode every earlier report field is unchanged; the only addition is `retriever.name = "bm25"` with empty model fields.
+- **Development results on `retrieval_v1` (not used for any choice; held-out evaluation is M2.5 B4):**
+
+  | Retriever | Hit@5 overall / direct / paraphrase | MRR@10 overall | Filtered Hit@5 / MRR@10 | Warm search p50 / p95 |
+  |---|---|---|---|---|
+  | BM25 | 0.667 / 0.769 / 0.400 | 0.388 | 1.000 / 0.754 | 0.8 / 1.7 ms |
+  | Semantic | 0.444 / 0.615 / 0.000 | 0.389 | 1.000 / 0.719 | 12.5 / 20.3 ms |
+  | Hybrid | 0.667 / 0.769 / 0.400 | 0.516 | 1.000 / 0.938 | 14.6 / 23.1 ms |
+
+- **Costs:**
+  - Embedding all 1,207 passages on one thread takes about 350 s, so semantic and hybrid evaluation runs take about 6 minutes instead of 11 s.
+  - Loading the model takes about 0.9 s.
+  - 61 passages exceed 512 tokens and are truncated (the longest has 1,867).
 
 ### 3.3 Later milestone: ingestion
 

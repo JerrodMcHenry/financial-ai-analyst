@@ -303,7 +303,7 @@ Improved detection for that format is deliberately not implemented in M2.1.
 - Treating citation failures as a metric: rejected; they invalidate the run.
 
 ## D-027 Batch citation verification against one snapshot per filing
-**Status:** Proposed (M2.5 B1, 2026-11-13)
+**Status:** Accepted (owner-approved M2.5 B1, 2026-11-13)
 **Decision:** `verify_citations(pairs, cache_dir)` in `passages.py` verifies many citations at once (architecture §3.2e). `verify_citation` is a batch of one. The evaluation verifies every distinct returned citation in one batch.
 - **Grouping:** by the cache's filing identity (CIK, accession number, primary document, form). Each group loads the cache entry once and hashes the loaded bytes once. It extracts and builds passages at most once, and only when some citation passes the hash and version checks. Passages are matched by block/character range.
 - **Unchanged:** the citation id format, the checks and their order, every status and detail, the `PassageVerification` fields, and the behavior for malformed ids, mismatched passages and missing or damaged cache entries.
@@ -318,3 +318,82 @@ Improved detection for that format is deliberately not implemented in M2.1.
 - A process-wide memo keyed by the hash of freshly read bytes: rejected for now, because hidden global state needs eviction, thread safety and test isolation.
 - Saving extractions to disk: rejected, because it adds a derived artifact with its own staleness and tampering risks.
 - Verifying against the passages the evaluation already built: rejected, because the check would compare the run's output with itself.
+
+## D-028 Frozen protocol for the BM25 / semantic / hybrid retrieval comparison
+**Status:** Proposed (M2.5 B3, 2026-11-13). Fixed before the held-out dataset is evaluated.
+**Decision:** Retrieval methods are compared once, on the held-out set `evals/retrieval_v2_heldout.json` (SHA-256 `2d42950ab5ec9e5b6f0fc8069a0ef55c3eb22967e8bb8d2dbb0de5da861eb43c`). The comparison uses the existing harness (D-026, D-027), its 80% relevance rule and its metrics, unchanged.
+- **Configurations (all fixed now):**
+  - `bm25`, as in D-025, unchanged.
+  - `semantic`: the model and settings in D-029.
+  - `hybrid`: Reciprocal Rank Fusion of the two, with k = 60 and depth 50 per ranker.
+- **Data roles:**
+  - `retrieval_v1` is the development set, used only to check that the code works.
+  - The held-out set is run once per configuration above, in M2.5 B4. Its questions are not read to choose or tune anything.
+  - Any configuration change after that run needs a new held-out set.
+- **Adoption criteria** for hybrid over BM25 on the held-out set (all must hold):
+  1. Paraphrase Hit@5 improves by at least **2 questions** (out of 20).
+  2. Direct Hit@5 loses at most **1 question** (out of 16).
+  3. Citation verification stays at **100%** (otherwise the run is invalid anyway).
+  4. Warm query **p95 under 50 ms** on the evaluation machine: the harness's primary-search latency, after one warm-up round, excluding model load and passage embedding.
+- **Reporting:** the configuration, model identity and fingerprints, and embedding fingerprint are recorded in each report. Direct and paraphrase results are reported separately, with counts as well as ratios. Results from the development set are never cited as evidence for adoption.
+
+**Why:** with 36 answerable held-out questions, small differences are noise. Fixing the configurations and thresholds before seeing held-out results keeps the comparison from being tuned to the test. The development set already showed how easily one would be tempted: see D-029's limitations.
+
+**Alternatives:**
+- Choosing the model, k or depth by trying them on either dataset: rejected, because that is tuning on the evaluation.
+- Learned or weighted score fusion: rejected for this experiment, because it needs a tuned weight.
+- Adopting on overall Hit@5 alone: rejected, because it hides a direct-question regression behind paraphrase gains.
+
+## D-029 Local embedding model, runtime and fusion for the retrieval experiment
+**Status:** Proposed (M2.5 B3, 2026-11-13)
+**Decision:** `semantic_retrieval.py` adds `SemanticIndex`, `fuse_rrf` and `HybridIndex` over the existing `Passage` objects. Passages, citation ids and verification are unchanged.
+- **Model:** `BAAI/bge-small-en-v1.5` at commit `5c38ec7c405ec4b44b94cc5a9bb96e735b38267a`, file `onnx/model.onnx` (BAAI's own fp32 export, 133,093,490 bytes, SHA-256 `828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35`, MIT license).
+  - It produces 384-dimensional vectors, uses CLS pooling with L2 normalization, and truncates input at 512 tokens.
+  - **No query instruction prefix** is used.
+- **Provenance:**
+  - All five model files are pinned by size and SHA-256 in code (`MODEL_FILES`). On download they were also checked against Hugging Face's published LFS hash and git blob ids.
+  - `install_model` downloads that exact commit and moves files into `data/models/` (git-ignored) only after verification.
+  - Every load verifies the files again. A missing or changed file raises `ModelIntegrityError`, and the evaluation refuses to run.
+  - The model fingerprint (`bd55c16c7bac8abe40fa2da1220f37380b477da579132ba11067bb488525e102`) is SHA-256 over the file hashes.
+- **Runtime:**
+  - FastEmbed 0.9.1 with ONNX Runtime 1.23.2 on CPU, in the optional `semantic` extra (`uv sync --extra semantic`).
+  - FastEmbed loads only from the local directory (`specific_model_path`), so it never downloads and never resolves a floating revision.
+  - `THREADS = 1` and `BATCH_SIZE = 32` keep floating-point results identical between runs.
+  - onnxruntime is pinned to 1.23.2 because later releases have no Intel macOS wheels for Python 3.13. On Python 3.14, FastEmbed's own requirement applies.
+- **Search:** exact cosine similarity (dot product of unit float32 vectors) over all passages, in memory, with no vector database. Filters and tie-breaks are exactly those of `KeywordIndex`. A blank query returns `[]`.
+- **Fusion:** RRF score = Σ 1/(60 + rank) over each ranker's top 50, with the same filters applied to both rankers. Equal scores break by document identity, then position. Hits are the original `Passage` objects.
+- **Fingerprints in every report:** model repository, revision, file hash and fingerprint, and the embedding fingerprint (SHA-256 of the citation ids plus the exact vector bytes), together with truncation counts.
+
+**Why:**
+- **BAAI's file, not FastEmbed's default:** FastEmbed's default copy of this model is a third-party fp16 file built for GPUs (`Qdrant/bge-small-en-v1.5-onnx-Q`). BAAI's file is first-party and fp32.
+- **Pinning by our own download:** FastEmbed can't pin a revision itself, so pinning has to happen in our download, enforced by hashes. The default repository changed as recently as 2026-09-24.
+- **Exact search in memory:** for about 1,200 passages it takes milliseconds and needs no database.
+
+**Inference configuration audit (2026-11-13, documentation only; nothing changed).** The implementation was compared with the configuration published at the pinned commit `5c38ec7c…`: `modules.json`, `1_Pooling/config.json`, `sentence_bert_config.json` and the model card (`README.md`, SHA-256 `ddb964361a55c6e5dfca6361615854b260c9c960205d04c7520151aaa1d75837`).
+
+| Setting | Model's published configuration | This implementation | Match |
+|---|---|---|---|
+| Pooling | CLS token (`pooling_mode_cls_token: true`; card: `model_output[0][:, 0]`) | FastEmbed `PoolingType.CLS` on `last_hidden_state` | Yes |
+| Normalization | L2 (`2_Normalize` module; card: `normalize_embeddings=True`) | `normalization=True` (unit-length vectors) | Yes |
+| Input length and case | `max_seq_length: 512`, `do_lower_case: true` | Tokenizer truncation at `model_max_length` 512; BERT lowercase tokenizer | Yes |
+| Passage formatting | "no instruction needs to be added to passages" | Raw passage text | Yes |
+| Query formatting | For short queries searching long passages, the card *recommends* the prefix `Represent this sentence for searching relevant passages: `. It also says v1.5 without the prefix shows "only a slight degradation", and that the best choice is whichever performs better on the task. | No prefix | **No: differs from the recommended short-query usage** |
+
+- The output matched an independent onnxruntime pipeline (CLS, then L2 normalization) exactly, so pooling and normalization are implemented as published.
+- **The no-prefix choice stands as frozen in this record, and is not changed by this audit.** It is a permitted but not recommended usage for this task type, and is a known limitation of the semantic and hybrid configurations.
+- Changing it would mean a new configuration, decided by the owner before the held-out run (D-028). It must never be chosen by comparing results on either dataset.
+
+**Known limitations (observed on the development set `retrieval_v1`, not used for any choice):**
+- **Truncation:** 61 of 1,207 passages exceed 512 tokens and are truncated, mostly tables.
+- **Cost of one thread:** embedding the corpus on one CPU thread takes minutes, which makes semantic and hybrid evaluation runs much slower than BM25.
+- **Development results:** semantic-only retrieval did worse than BM25 on `retrieval_v1`, including on paraphrases. That set has only 5 paraphrase questions, and this is recorded without changing anything.
+- **Query side:** embeddings know nothing about company or period, so cross-filing competition remains. Filters still solve that.
+- **Query formatting:** queries are embedded without the instruction prefix the model card recommends for short-query retrieval (see the audit above).
+- **Platform:** ONNX Runtime results are reproducible on one machine with fixed threads, but may differ by small amounts across CPUs or builds. The embedding fingerprint shows when they do.
+
+**Alternatives:**
+- FastEmbed's default fp16 file: rejected (provenance; tuned for GPU).
+- sentence-transformers with PyTorch: rejected (a dependency footprint of over 700 MB).
+- Hosted embeddings: rejected (needs network access and a key, and the model can change without notice).
+- pgvector or FAISS: unnecessary at this size.
+- Calling onnxruntime directly without FastEmbed: possible, about 40 lines. The owner chose FastEmbed, and its output matched this direct pipeline exactly in a check.

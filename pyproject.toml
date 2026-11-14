@@ -13,6 +13,16 @@ dependencies = [
     "beautifulsoup4>=4.12",
 ]
 
+[project.optional-dependencies]
+# Local semantic retrieval (D-029). Exact pins: FastEmbed cannot pin a model revision, so the
+# model is installed separately and verified by hash. onnxruntime 1.23.2 is the newest release
+# with Intel macOS wheels for Python 3.13; FastEmbed requires a newer one on Python 3.14.
+semantic = [
+    "fastembed==0.9.1",
+    "onnxruntime==1.23.2; python_full_version < '3.14'",
+    "onnxruntime>=1.24.2; python_full_version >= '3.14'",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",

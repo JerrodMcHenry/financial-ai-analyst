@@ -2,8 +2,9 @@
 
 A dataset (JSON) pins each filing by its full SHA-256 and the extractor and passage-builder
 versions, and labels evidence as exact text spans in extracted blocks. The runner reads the
-filings only from the filing cache (never from SEC), builds one combined BM25 index, and
-measures relevance, citation integrity and latency.
+filings only from the filing cache (never from SEC), builds one combined index with the chosen
+retriever (BM25 by default; semantic or hybrid with the "semantic" extra, D-028), and measures
+relevance, citation integrity and latency.
 
 Two kinds of failure are kept apart:
 - Integrity failures (missing or mismatched documents, unresolvable evidence, citations that
@@ -25,7 +26,7 @@ import time
 from collections import Counter
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -36,6 +37,11 @@ from financial_analyst.passages import BUILDER_VERSION, Passage, build_passages,
 from financial_analyst.retrieval import KeywordIndex, SearchHit
 from financial_analyst.sec_models import FilingRef
 
+if TYPE_CHECKING:  # the semantic module needs numpy, from the optional "semantic" extra
+    from financial_analyst.semantic_retrieval import RankedHit
+
+    Hit = SearchHit | RankedHit
+
 # A passage is relevant to an evidence span only if it contains at least this share of the
 # span's characters. Tiny overlaps (a shared boundary character) never count.
 RELEVANCE_THRESHOLD = 0.8
@@ -44,6 +50,7 @@ METRIC_K = 5  # Hit@5, labeled-evidence recall@5, combined coverage@5, section p
 MIN_SNIPPET_CHARS = 20
 
 QuestionKind = Literal["direct", "paraphrase", "unanswerable"]
+Retriever = Literal["bm25", "semantic", "hybrid"]
 _KEY = r"^[a-z0-9][a-z0-9-]*$"
 
 
@@ -265,7 +272,7 @@ def reciprocal_rank(relevant: list[bool], k: int) -> float:
     return 0.0
 
 
-def section_precision(hits: list[SearchHit], expected: set[tuple[str, str]]) -> float | None:
+def section_precision(hits: "list[Hit]", expected: set[tuple[str, str]]) -> float | None:
     """Share of the hits whose (content_sha256, section) is expected. Every hit counts in
     the denominator, including hits from other filings and sectionless passages.
     None when there are no hits (precision is undefined; Hit@k already scores that)."""
@@ -362,7 +369,8 @@ class Timings(BaseModel):
     python: str
     platform: str
     documents: list[DocumentTiming]
-    index_build_ms: float
+    model_load_ms: float | None = None  # semantic and hybrid: verify and load the model
+    index_build_ms: float  # semantic and hybrid: includes embedding every passage
     search: LatencySummary  # primary (unfiltered) searches only, after one warm-up round
     # One verify_citations batch, measured separately from search: each filing is loaded,
     # hashed, extracted and rebuilt once, then every citation is checked.
@@ -370,9 +378,32 @@ class Timings(BaseModel):
     verification_by_document: list[VerificationTiming]
 
 
+class RetrieverConfig(BaseModel):
+    """Exactly what ranked the passages. Model fields are None for BM25."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: Retriever
+    rrf_k: int | None = None  # hybrid only
+    rrf_depth: int | None = None  # hybrid only: hits taken from each ranker
+    model_repo: str | None = None
+    model_revision: str | None = None
+    model_file: str | None = None
+    model_file_sha256: str | None = None
+    model_fingerprint: str | None = None  # SHA-256 over every pinned model file's hash
+    embedding_dim: int | None = None
+    max_tokens: int | None = None
+    threads: int | None = None
+    batch_size: int | None = None
+    embedding_sha256: str | None = None  # citation ids and the exact passage vector bytes
+    passages_truncated: int | None = None  # passages longer than max_tokens
+    max_passage_tokens: int | None = None
+
+
 class EvalReport(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    retriever: RetrieverConfig = RetrieverConfig(name="bm25")
     dataset_version: str
     dataset_sha256: str
     documents: list[EvalDocument]
@@ -411,9 +442,15 @@ def load_dataset(path: Path) -> tuple[EvalDataset, str]:
 
 
 def run_evaluation(
-    dataset_path: Path, cache_dir: Path, *, search_repetitions: int = 20
+    dataset_path: Path,
+    cache_dir: Path,
+    *,
+    search_repetitions: int = 20,
+    retriever: Retriever = "bm25",
+    model_dir: Path | None = None,
 ) -> EvalReport:
-    """Evaluate retrieval on the pinned filings in `cache_dir`. Never contacts SEC.
+    """Evaluate retrieval on the pinned filings in `cache_dir`. Never contacts SEC, and never
+    downloads a model: semantic and hybrid need the verified model in `model_dir`.
 
     Raises EvaluationError, with every problem found, if the evaluation is invalid.
     """
@@ -488,11 +525,11 @@ def run_evaluation(
         raise EvaluationError(problems)
 
     # 3. One combined index; primary searches are unfiltered.
-    started = time.perf_counter()
-    index = KeywordIndex(passages)
-    index_build_ms = _ms_since(started)
+    index, retriever_config, model_load_ms, index_build_ms = _build_index(
+        retriever, passages, model_dir
+    )
 
-    primary: dict[str, list[SearchHit]] = {}
+    primary: dict[str, list[Hit]] = {}
     search_ms: list[float] = []
     for round_number in range(search_repetitions + 1):  # round 0 is a warm-up
         for question in dataset.questions:
@@ -507,7 +544,7 @@ def run_evaluation(
                 problems.append(f"{question.id}: search results differ between repetitions")
 
     # 4. Secondary filtered searches, checked against their filters independently.
-    filtered: list[tuple[EvalQuestion, FilteredSearch, list[SearchHit]]] = []
+    filtered: list[tuple[EvalQuestion, FilteredSearch, list[Hit]]] = []
     compliance_checked = 0
     for question in dataset.questions:
         for search in question.filtered_searches:
@@ -537,7 +574,7 @@ def run_evaluation(
 
     # 5. Every distinct returned citation must verify against the cache.
     key_by_sha = {pin.content_sha256: pin.key for pin in dataset.documents}
-    distinct: dict[str, SearchHit] = {}
+    distinct: dict[str, Hit] = {}
     for hits in [*primary.values(), *(hits for _, _, hits in filtered)]:
         for hit in hits:
             distinct.setdefault(hit.citation_id, hit)
@@ -578,6 +615,7 @@ def run_evaluation(
 
     answerable = [r for r in question_results if r.kind != "unanswerable"]
     return EvalReport(
+        retriever=retriever_config,
         dataset_version=dataset.dataset_version,
         dataset_sha256=dataset_sha256,
         documents=dataset.documents,
@@ -595,6 +633,7 @@ def run_evaluation(
             python=platform.python_version(),
             platform=platform.platform(),
             documents=document_timings,
+            model_load_ms=model_load_ms,
             index_build_ms=index_build_ms,
             search=_summarize(search_ms),
             verification_ms=verification_ms,
@@ -606,9 +645,53 @@ def run_evaluation(
     )
 
 
+def _build_index(retriever: Retriever, passages: list[Passage], model_dir: Path | None) -> tuple:
+    """(index, RetrieverConfig, model_load_ms, index_build_ms) for the chosen retriever."""
+    if retriever == "bm25":
+        started = time.perf_counter()
+        index = KeywordIndex(passages)
+        return index, RetrieverConfig(name="bm25"), None, _ms_since(started)
+    try:
+        from financial_analyst import semantic_retrieval as semantic
+    except ImportError as exc:
+        hint = "install it with: uv sync --extra semantic"
+        raise EvaluationError(
+            [f"retriever {retriever!r} needs the 'semantic' extra ({hint}): {exc}"]
+        ) from exc
+    started = time.perf_counter()
+    try:
+        embedder = semantic.LocalEmbedder(model_dir or semantic.DEFAULT_MODEL_DIR)
+    except semantic.ModelIntegrityError as exc:
+        raise EvaluationError([str(exc)]) from exc
+    model_load_ms = _ms_since(started)
+    started = time.perf_counter()
+    semantic_index = semantic.SemanticIndex(passages, embedder.embed)
+    index = semantic_index if retriever == "semantic" else semantic.HybridIndex(semantic_index)
+    index_build_ms = _ms_since(started)
+    tokens = embedder.token_counts([p.text for p in passages])
+    config = RetrieverConfig(
+        name=retriever,
+        rrf_k=semantic.RRF_K if retriever == "hybrid" else None,
+        rrf_depth=semantic.RRF_DEPTH if retriever == "hybrid" else None,
+        model_repo=semantic.MODEL_REPO,
+        model_revision=semantic.MODEL_REVISION,
+        model_file=semantic.MODEL_FILE,
+        model_file_sha256=semantic.MODEL_FILES[semantic.MODEL_FILE][1],
+        model_fingerprint=embedder.fingerprint,
+        embedding_dim=semantic.EMBEDDING_DIM,
+        max_tokens=semantic.MAX_TOKENS,
+        threads=semantic.THREADS,
+        batch_size=semantic.BATCH_SIZE,
+        embedding_sha256=semantic_index.fingerprint(),
+        passages_truncated=sum(count > semantic.MAX_TOKENS for count in tokens),
+        max_passage_tokens=max(tokens, default=0),
+    )
+    return index, config, model_load_ms, index_build_ms
+
+
 def _question_result(
     question: EvalQuestion,
-    hits: list[SearchHit],
+    hits: "list[Hit]",
     evidence: list[ResolvedEvidence],
     pins: dict[str, EvalDocument],
 ) -> QuestionResult:
@@ -702,10 +785,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--output", type=Path, help="write the full JSON report here")
     parser.add_argument("--repetitions", type=int, default=20, help="timed rounds per search")
+    parser.add_argument("--retriever", choices=["bm25", "semantic", "hybrid"], default="bm25")
+    parser.add_argument(
+        "--model-dir", type=Path, help="semantic and hybrid: the verified model directory"
+    )
     args = parser.parse_args(argv)
 
     try:
-        report = run_evaluation(args.dataset, args.cache_dir, search_repetitions=args.repetitions)
+        report = run_evaluation(
+            args.dataset,
+            args.cache_dir,
+            search_repetitions=args.repetitions,
+            retriever=args.retriever,
+            model_dir=args.model_dir,
+        )
     except EvaluationError as exc:
         print(f"Evaluation invalid: {exc}", file=sys.stderr)
         return 2
@@ -716,6 +809,15 @@ def main(argv: list[str] | None = None) -> int:
         return "n/a" if value is None else f"{value:.3f}"
 
     print(f"dataset {report.dataset_version} sha256={report.dataset_sha256}")
+    r = report.retriever
+    if r.name == "bm25":
+        print("retriever bm25")
+    else:
+        print(
+            f"retriever {r.name}: {r.model_repo}@{r.model_revision[:12]} "
+            f"embeddings {r.embedding_sha256[:16]}, {r.passages_truncated} passages truncated"
+            + (f", RRF k={r.rrf_k} depth={r.rrf_depth}" if r.name == "hybrid" else "")
+        )
     for name in ("overall", "direct", "paraphrase", "filtered"):
         m: RelevanceMetrics = getattr(report, name)
         print(
