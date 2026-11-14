@@ -542,7 +542,7 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - Deriving Q4 or missing quarters from year-to-date values: rejected for M3.
 
 ## D-033 Same-filing comparisons and the percentage-change policy
-**Status:** Proposed (M3.3 B2, 2026-11-14)
+**Status:** Accepted (M3.3 B2, 2026-11-14)
 **Decision:** `compare_periods` compares one metric between two exact periods, with both values read from a single filing (architecture §3.2k).
 - **The filing:** the current period's original reporting filing, the commentary filing by default, or a named listed 10-K or 10-Q.
 - **Both observations** must use the mapped concept and unit, match their exact period boundaries, and come from that filing. Otherwise the comparison is refused: `observation_not_in_filing`, `period_class_mismatch`, `unit_mismatch`.
@@ -566,3 +566,24 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - Mixing the latest value for each side: rejected, because it can pair numbers no filing discussed.
 - Using the original filing accession Company Facts reveals for an unlisted period: rejected, because it isn't verified against submissions.
 - Percentages with absolute-value bases: rejected for this policy.
+
+## D-034 Evidence-backed analysis: same-filing numbers, verified candidate commentary, no LLM
+**Status:** Proposed (M3.4, 2026-11-14)
+**Decision:** `explain_change` returns one `GroundedResult` that joins `compare_periods` with BM25 retrieval and batch citation verification, all offline (architecture §3.2l).
+- **Numbers:** only from the `Comparison`. The summary is a fixed template over its fields; no figure is computed or restated anywhere else.
+- **Commentary scope:** only the comparison's commentary filing, from the filing cache. The index holds only that document's passages. Its MD&A section (10-K Item 7, 10-Q Part I, Item 2) is searched when the extractor found that label reliably; otherwise the whole verified filing. A filing that is missing or fails integrity checks is never fetched or substituted.
+- **Default query:** the company's own term for the metric plus its words for a change, fixed per company and versioned. An explicit query may replace it.
+- **Evidence:** a retrieved passage is evidence only if its citation verifies, it comes from the searched filing and section, and its tokens contain the company's term for the metric. Every other hit is listed as rejected, with the reason.
+- **Support level:** every evidence item is a `candidate`. A verified citation proves source integrity, not that the passage explains the change, and no causal claim is generated.
+- **Status:** `complete` (comparison and at least one evidence passage), `partial` (comparison, no usable commentary), `abstained` (no reliable comparison; no summary, no commentary).
+
+**Why:**
+- Reading commentary from the filing that reports both values keeps numbers and narrative from different restatements apart (D-033).
+- An index per filing makes it impossible for another company's or filing's passage to rank, or to influence the statistics.
+- Lexical retrieval cannot establish meaning, so the result must not imply that it can. Labeling candidates, and keeping integrity separate from support, leaves that judgment to a person or to a later, checked step.
+
+**Alternatives:**
+- Ranking within the frozen multi-filing index with an accession filter: rejected, because other filings would still shape the scores, and the baseline must stay untouched.
+- Treating the top hit as the explanation: rejected, because it would present a lexical match as a causal claim.
+- Falling back to another filing's commentary, or broadening a missing section label to the whole filing for 10-Ks: rejected for numbers-to-narrative consistency. Only filings with no reliable label at all are searched whole.
+- Semantic retrieval: not adopted (D-028); BM25 stays the default.

@@ -16,7 +16,9 @@ report dates, exact per-company XBRL concepts for revenue, net income and total 
 JPMorgan Chase), and fact selection by explicit policy (`latest_filed`, `original`,
 `same_filing`). M3.3 B2 adds deterministic comparisons: both values from one filing, an exact
 Decimal delta, and a percentage shown only for a positive base, with restatements reported
-separately. The LLM agent comes next. See [docs/architecture.md](docs/architecture.md) and
+separately. M3.4 joins them with BM25 retrieval into one evidence-backed analysis result
+(numbers from the comparison, verified candidate commentary from the same filing, no LLM). The
+LLM agent comes next. See [docs/architecture.md](docs/architecture.md) and
 [docs/decisions.md](docs/decisions.md).
 
 ## Requirements
@@ -243,3 +245,32 @@ returns `None` with a reason instead of choosing
 arbitrarily between disagreeing values, and it never mixes units. SEC's `fy`/`fp` describe the
 *filing* and are stored as `filing_fiscal_year`/`filing_fiscal_period`. Details:
 [docs/architecture.md](docs/architecture.md) §3.2d.
+
+## Evidence-backed analysis (offline)
+
+```bash
+uv run python -m financial_analyst.analysis            # Apple FY2026 revenue, JPMorgan Q3 2026 net income
+uv run python -m financial_analyst.analysis AAPL revenue FY2026Q3 FY2025Q3 --query "iPhone net sales"
+```
+
+```python
+from pathlib import Path
+
+from financial_analyst.analysis import explain_change, load_pinned_data, parse_period
+
+cache = Path("data/sec-cache")
+data = load_pinned_data(Path("evals/sec_snapshots_v1.json"), cache)
+fy2026, fy2025 = parse_period("FY2026"), parse_period("FY2025")
+result = explain_change("AAPL", "revenue", fy2026, fy2025, data=data, cache_dir=cache)
+print(result.status, result.summary)
+for passage in result.evidence:  # verified candidates, not proof of an explanation
+    print(passage.citation_id, passage.text[:200])
+```
+
+`explain_change` needs the pinned snapshots and the cached filings, and never contacts SEC.
+Every figure comes from `compare_periods`. Commentary is searched only in the filing that
+reports both values (its MD&A when the section label is reliable), and a passage is returned
+only if its citation verifies and it mentions the metric. A verified citation proves the text
+is exactly what the filing says, not that it explains the change, so passages are labeled
+candidates. The status is `complete`, `partial` (no usable commentary) or `abstained` (no
+reliable comparison), with reasons. Details: [docs/architecture.md](docs/architecture.md) §3.2l.

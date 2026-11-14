@@ -1,7 +1,7 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal periods, concept mapping, fact selection) committed; M3.3 B2 (deterministic same-filing comparisons and percentage change) awaiting review. No LLM or agent yet. Sections marked "later" are design intent, not commitments.
-Last updated: 2026-11-13
+Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal periods, concept mapping, fact selection) committed; M3.3 B2 (deterministic same-filing comparisons and percentage change) approved; M3.4 (evidence-backed analysis: comparison plus verified candidate commentary, no LLM) awaiting review. No LLM or agent yet. Sections marked "later" are design intent, not commitments.
+Last updated: 2026-11-14
 
 ---
 
@@ -802,7 +802,7 @@ PeriodRequest(kind, fiscal_year, quarter)            fiscal_year | fiscal_quarte
   - Apple: FY2015 total assets were 290,479M in the FY2015 10-K and 290,345M in the FY2016 10-K. The FY2009 net income restatement through a 10-K/A predates the listed 10-Ks.
   - JPMorgan: 2020 revenue and assets were revised in 2021 filings.
 
-### 3.2k Milestone 3.3 B2: deterministic comparisons and percentage change (awaiting review)
+### 3.2k Milestone 3.3 B2: deterministic comparisons and percentage change (approved)
 
 Decision: D-033. Code: `compare_periods`, `calculate_change`, `percent_change` and `sign_change` in `financial_tools.py`.
 
@@ -859,6 +859,68 @@ compare_periods(submissions, facts, metric, current, prior, policy="same_filing"
 - Neither value ever replaces the same-filing value.
 
 **Not implemented:** separately sourced comparisons (`latest_filed`, `original`) are refused with `policy_not_supported`. There is no automatic fallback to another filing.
+
+### 3.2l Milestone 3.4: evidence-backed financial analysis, no LLM (awaiting review)
+
+Decision: D-034. Code: `explain_change`, `GroundedResult` and the offline CLI in `analysis.py` (one new module). It joins existing parts and re-implements none of them: no period, mapping, selection, arithmetic, retrieval or verification logic is duplicated.
+
+```
+explain_change(identifier, metric, current_period, prior_period, query=None, *, data, cache_dir, k=5)
+  data            ← load_pinned_data(manifest, cache_dir)      (every snapshot SHA-256-verified)
+  company         ← resolve_company(identifier, tickers)       ──✗ abstained
+  comparison      ← compare_periods(..., "same_filing")        ──✗ abstained (any FinancialDataError)
+  summary         ← format_summary(comparison)                 (fixed template; figures only from the Comparison)
+  commentary filing = comparison.commentary_filing             (the filing both values come from)
+  document        ← load_filing_document(cache_dir, filing)    ──✗ partial (missing or failed integrity; never downloads)
+  passages        ← build_passages(extract_filing(document)), only this exact document (CIK, accession, file, form)
+  section         ← "Item 7" (10-K) / "Part I, Item 2" (10-Q) if the extractor found that label reliably, else whole filing
+  hits            ← KeywordIndex(passages).search(query or default_query, k, section, accession)
+  checks          ← verify_citations(hits, cache_dir)          (batch, re-extracts from cached bytes)
+  evidence        ← hits that are verified, in scope, and contain the company's term for the metric
+  → GroundedResult(status, company, comparison, summary, retrieval scope, evidence, rejected, reasons)
+```
+
+**Status:**
+
+| Status | When |
+|---|---|
+| `complete` | The comparison succeeded, and at least one retrieved passage is verified, from the commentary filing (and its MD&A, when labeled) and mentions the metric |
+| `partial` | The comparison succeeded, but the filing is not cached or fails integrity checks, nothing matched the query, or every hit failed verification or does not mention the metric |
+| `abstained` | The company, its pinned data or the comparison cannot be established exactly; no summary and no commentary |
+
+`reasons` explains each gap, including an unavailable percentage (zero or negative base). `rejected` lists every retrieved passage that is not evidence, with its rank, citation id, verification status and reason (`citation_not_verified`, `out_of_scope`, `does_not_mention_metric`).
+
+**Default query:** the company's own MD&A term for the metric followed by its words for a change (`METRIC_TERMS`, `CHANGE_TERMS`): Apple revenue is `net sales increased decreased compared`; JPMorgan net income is `net income firmwide reported up down`. These terms are fixed and versioned (`ANALYSIS_VERSION`). An explicit query replaces them, but the metric-mention check still applies.
+
+**Scope:**
+- The index is built from the commentary filing's passages alone, so BM25 statistics and results never involve another company or filing. Scores therefore differ from the frozen multi-filing baseline index, which is unchanged and is not used here.
+- Apple's 10-K and 10-Q have reliable MD&A labels, so they are searched in Item 7 or Part I, Item 2. JPMorgan's Q3 2026 10-Q has no reliable section labels (M2.1), so the whole verified filing is searched, and candidates can come from the financial statements and notes as well as MD&A.
+
+**Two kinds of provenance:**
+
+| | Numerical provenance | Narrative citation |
+|---|---|---|
+| Identifies | A Company Facts observation: accession, concept, unit, exact period, value | A passage of a filing document: CIK, accession, file, document SHA-256, extractor and builder versions, block and character range, text hash |
+| Pinned by | The Company Facts snapshot's SHA-256, `observation_id`, `comparison_id` | The citation id itself |
+| Verified by | Snapshot SHA-256 on load, and the comparison rules (D-033) | `verify_citations`: re-extract the cached bytes and rebuild the passage identically |
+| Supports | The figures in the summary | Only that the passage text is exactly what the filing says |
+
+**Citation validity is not claim support.** A verified citation proves source integrity. It does not show that the passage explains the change: BM25 and the phrase check are lexical, so JPMorgan's results include a segment's "Net income was $8.2 billion, up 20%" next to the Firmwide figure. Every evidence item is therefore labeled `support: "candidate"`, the result carries a fixed `limitation` statement, and nothing turns a passage into a causal claim ("revenue rose because ...").
+
+**CLI:** `uv run python -m financial_analyst.analysis` runs both required examples offline; `... AAPL revenue FY2026Q3 FY2025Q3 --query "..."` runs one request. Output: company, metric and concept, period labels, values, exact and displayed change, source filing, candidate passages (320-character previews) with citation ids and verification status, rejections and reasons. Exit code 0, 1 if any request abstained, 2 for bad input or unavailable pinned data.
+
+**Example results (pinned data):**
+
+| Request | Status | Change | Commentary filing / scope | Evidence |
+|---|---|---|---|---|
+| Apple revenue FY2026 vs FY2025 | complete | +62,673,000,000 (+15.1%) | 10-K `0000320193-26-000026`, Item 7 (26 passages) | 4 of 5 hits ("iPhone net sales increased during 2026 compared to 2025 due to higher net sales of Pro models", ...); 1 rejected: no "net sales" |
+| JPMorgan net income Q3 2026 vs Q3 2025 | complete | +912,000,000 (+6.3%) | 10-Q `0001628280-26-069523`, whole filing (781 passages) | 3 of 5 hits, first "reported net income of $15.3 billion, up 6%"; 2 rejected: no "net income" |
+
+**Limitations and next milestone:**
+- Relevance is lexical: candidates can mention the metric without explaining the change, or explain it in words the query misses.
+- JPMorgan searches are not restricted to MD&A until 10-Q section detection handles its layout.
+- Only same-filing comparisons and the six mapped metrics are supported. The filing must already be cached; nothing is fetched.
+- Next: the M3 LLM tool-calling agent, which may propose these tool calls and draft prose, with every number checked against the `Comparison` and every citation against this result's verified evidence.
 
 ### 3.3 Later milestone: ingestion
 
