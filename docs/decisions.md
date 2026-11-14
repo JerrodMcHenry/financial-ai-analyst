@@ -648,7 +648,7 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - Live tests inside pytest behind a skip marker: rejected; they would make "0 skipped" meaningless. Live runs stay in the CLI.
 
 ## D-038 Six model turns, a workflow prompt, and diagnosable live runs
-**Status:** Proposed (M3.6 B2.1, 2026-11-14)
+**Status:** Accepted (M3.6 B2.1, 2026-11-14)
 **Context:** the first live smoke tests (GPT-5.4 mini, two cases, 7 requests, ~$0.0127) made one tool call per turn. Resolve → compare → search → answer needs exactly four turns, so Apple answered without commentary (partial) and JPMorgan ran out of turns (abstained). No provider or schema errors occurred, and the validator rejected nothing incorrectly.
 **Decision:**
 - **Turns:** `MAX_MODEL_TURNS` rises from 4 to 6 (a repair still counts). Unchanged: 6 tool calls, 90 seconds, one repair, request timeouts capped by the run's remaining time. Tools requested in the last allowed turn are still never run, and an invalid draft on the last turn gets no repair.
@@ -676,3 +676,56 @@ Nothing here rejects semantic or hybrid retrieval in general.
 **Alternatives:**
 - Letting `compare` take a company name: rejected for now, because it would merge identity resolution into a financial tool.
 - Forcing `search_commentary` in code: rejected, because some questions need no commentary. The prompt asks for it, and the evaluation labels check it.
+
+## D-039 Repair through the answer tool, and independent request scope before publishing
+**Status:** Accepted (M3.6 B3.1, 2026-11-14)
+**Context:**
+- **Live B3:** four `model_error` runs (rejected draft, then an empty repair response) and one Q4 question answered with fiscal-year figures and published as complete (architecture §3.2q).
+- **Repair path defects:** it erased the `submit_answer` call, contradicted it ("do not call tools"), offered every tool, gave unlocated feedback and recorded no reasons.
+
+**Decision:**
+- **Repair:**
+  - a draft submitted through `submit_answer` keeps its call ID, and a rejection is returned as that call's tool result with structured codes and located problems (no input values);
+  - the repair turn offers no agent tools, and the adapter sends and forces only `submit_answer`;
+  - limits are unchanged: one repair, none on the last turn;
+  - rejection codes are kept in `AgentRunResult.draft_rejections` and the live diagnostics;
+  - null optional lists in a draft are read as empty.
+- **Request scope:**
+  - `request_scope.capture_scope` reads company, metric and periods from the question with fixed, documented patterns;
+  - `ground` requires the subject comparison to match it exactly, and otherwise abstains: `scope_unresolved` when the scope is unparsed, ambiguous or unsupported, `scope_mismatch` when the subject differs;
+  - the model's tool calls cannot change the scope.
+- **Evaluation:** labels are unchanged. The scripted-behavior labels are documented, and an outcome-based `agent_v2` revision is proposed separately.
+
+**Why:**
+- In function calling, an answer that fails validation is a failed call. Answering it as one, and allowing only the answer function, gives the model one unambiguous way to repair.
+- The validator proved that figures came from the run, not that they answer the question. A deterministic, question-only reading closes that gap without letting the model define what was asked.
+- Abstaining on an unreadable question is the conservative choice. It loses some answerable questions but never publishes a substituted comparison.
+
+**Alternatives:**
+- A general natural-language parser or an LLM-based intent extractor: rejected, because it would be neither deterministic nor independent of the model.
+- Letting the draft declare its requested scope: rejected, because the model would be grading its own reading of the question.
+- Leniency for invalid drafts beyond null lists: rejected; the placeholder rule and value-ID patterns stay strict.
+
+## D-040 Commentary only when asked, citation feedback, consolidated metrics only, and outcome-based evaluation
+**Status:** Proposed (M3.7, 2026-11-14)
+**Decision:**
+- **What a complete answer must contain** comes from the question:
+  - figures only, unless the question asks for commentary (fixed cues) or a quotation;
+  - commentary requires at least one grounded citation, which can only come from this run's search of the subject comparison's filing;
+  - a quotation requires a verified, correctly attributed quotation.
+
+  Comparing two periods does not require commentary. Any presented citation or quotation must still pass every check.
+- **Citations:** the prompt requires citation IDs copied exactly from this run's search results. A structurally valid draft citing an ID the run never returned uses the single repair (`citation_not_returned`), with the list of returned IDs. On the last attempt the draft stands and grounding rejects the citation. Nothing is substituted.
+- **Metrics:** only consolidated figures. A question naming a reported segment, product or region, or asking for a breakdown, has an unsupported scope and abstains.
+- **Evaluation:** `agent_v1.json` is frozen. `agent_v2.json` labels the information need and acceptable statuses, never a tool path, and scores ten dimensions independently. The six v1 cases whose status changes under this policy are listed and tested.
+
+**Why:**
+- Requiring commentary for every comparison made correct numerical answers look incomplete. Requiring it only when asked keeps "partial" meaningful.
+- The live run showed a model citing an ID it never received. Telling it which IDs exist is the least it needs to correct itself, and leaves verification untouched.
+- "iPhone net sales" is not revenue. Answering with consolidated figures would answer another question.
+- Path-specific labels scored correct live abstentions as failures. Outcome labels measure what the user needed.
+
+**Alternatives:**
+- Forcing a commentary search in the agent loop: rejected, because the requirement belongs to the published answer, and a forced extra turn would spend budget on questions that do not need it.
+- Short citation aliases for the model: rejected for now, because mapping aliases to IDs is a substitution layer the validator would have to trust.
+- Narrower segment detection (only directly before a metric word): rejected for now, as more fragile. The broad rule abstains rather than risk a consolidated answer.

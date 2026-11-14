@@ -515,8 +515,9 @@ def test_failed_cases_exit_nonzero_with_safe_diagnostics(no_env_file, monkeypatc
     d = apple["diagnostics"]
     assert [s["name"] for s in d["tools"]] == ["compare"] and d["model_turns"] == 2
     assert d["reached"] == {"compare": True, "search_commentary": False, "submit_answer": True}
-    assert d["terminal_reason"] == "drafted" and apple["status"] == "partial"
-    assert apple["checks"]["numeric"] and not apple["checks"]["status"]
+    # The v1 label still wants a citation from the 10-K, so the case fails on provenance.
+    assert d["terminal_reason"] == "drafted" and apple["status"] == "complete"
+    assert apple["checks"]["numeric"] and apple["checks"]["status"]
     assert not apple["checks"]["citation_provenance"]
 
     # JPMorgan: tool errors, a correction, then a draft the validator rejects.
@@ -547,3 +548,171 @@ def test_a_passing_evaluation_exits_zero(no_env_file, monkeypatch, tmp_path):
     code = live_agent.main(["eval", "--cases", "apple-fy2026-revenue"],
                            transport=httpx.MockTransport(apple_provider()))  # fmt: skip
     assert code == 0
+
+
+# --- The repair protocol (M3.6 B3.1) ----------------------------------------------------------
+
+APPLE_Q = "How much did Apple's revenue grow in fiscal 2026 compared with fiscal 2025?"
+APPLE_COMPARE = {"cik": APPLE, "metric": "revenue",
+                 "current_period": {"kind": "fiscal_year", "fiscal_year": 2026},
+                 "prior_period": {"kind": "fiscal_year", "fiscal_year": 2025}}  # fmt: skip
+
+
+def apple_draft(body, **changes) -> dict:
+    cid = tool_output(body, "c1")["output"]["comparison_id"]
+    draft = {"subject": cid, "answer": "{company} {metric} changed by {delta}.",
+             "values": [{"placeholder": "delta", "value_id": f"{cid}/delta"}]}  # fmt: skip
+    return draft | changes
+
+
+def compare_then(*answer_steps) -> FakeProvider:
+    return FakeProvider([completion([tool_call("c1", "compare", APPLE_COMPARE)]), *answer_steps])
+
+
+def run_with(provider: FakeProvider, question: str = APPLE_Q):
+    with model_for(provider) as model:
+        return run_agent(question, model, data=DATA, cache_dir=CACHE)
+
+
+@pinned
+def test_a_rejected_draft_is_repaired_through_submit_answer():
+    def bad(body):  # declares {delta} but writes {change}: the placeholder rule fails
+        return completion([tool_call("a1", ANSWER_TOOL, apple_draft(body, answer="Up {change}."))])
+
+    def repaired(body):
+        # The repair request: the rejected call replayed under its id, answered with codes,
+        # and only submit_answer offered and forced.
+        assert [t["function"]["name"] for t in body["tools"]] == [ANSWER_TOOL]
+        assert body["tool_choice"] == {"type": "function", "function": {"name": ANSWER_TOOL}}
+        call = body["messages"][-2]
+        assert call["role"] == "assistant" and call["tool_calls"][0]["id"] == "a1"
+        assert call["tool_calls"][0]["function"]["name"] == ANSWER_TOOL
+        result = tool_output(body, "a1")
+        assert result["ok"] is False and result["error"]["codes"] == ["placeholder_mismatch"]
+        assert "submit_answer" in result["error"]["message"]
+        assert "No other tool may be called" in result["error"]["message"]
+        return completion([tool_call("a2", ANSWER_TOOL, apple_draft(body))])
+
+    provider = compare_then(bad, repaired)
+    run = run_with(provider)
+    assert run.status == "drafted" and run.repair_attempted and len(provider.requests) == 3
+    assert run.draft_rejections == [["placeholder_mismatch"]]
+    assert ground(run, data=DATA, cache_dir=CACHE).status == "complete"  # figures-only question
+
+
+@pinned
+def test_an_empty_repair_response_ends_the_run_with_its_finish_reason():
+    def bad(body):
+        return completion([tool_call("a1", ANSWER_TOOL, apple_draft(body, answer="Up {x}."))])
+
+    provider = compare_then(bad, completion(content=None))  # neither calls nor content
+    run = run_with(provider)
+    assert run.status == "model_error" and len(provider.requests) == 3
+    assert "neither tool calls nor content (finish_reason=stop)" in run.error
+    assert run.draft_rejections == [["placeholder_mismatch"]]
+
+
+@pinned
+def test_a_repair_turn_cannot_call_financial_tools():
+    def bad(body):
+        return completion([tool_call("a1", ANSWER_TOOL, apple_draft(body, answer="Up {x}."))])
+
+    provider = compare_then(bad, completion([tool_call("c2", "compare", APPLE_COMPARE)]))
+    run = run_with(provider)
+    assert run.status == "invalid_draft" and [r.call.id for r in run.tool_results] == ["c1"]
+
+
+@pinned
+@pytest.mark.parametrize(
+    ("change", "codes"),
+    [
+        ({"answer": "Up {x}."}, ["placeholder_mismatch"]),
+        ({"values": [{"placeholder": "company", "value_id": "obs:" + "0" * 64}]},
+         ["reserved_placeholder"]),
+        ({"confidence": 0.9}, ["extra_field"]),
+        ({"quotes": [{"citation_id": "c", "text": "y" * 301}]}, ["string_too_long:quotes.0.text"]),
+        ({"values": [{"placeholder": "delta", "value_id": "62673000000"}]},
+         ["string_pattern_mismatch:values.0.value_id"]),
+        ({"subject": ""}, ["string_pattern_mismatch:subject"]),
+    ],
+)  # fmt: skip
+def test_malformed_drafts_get_structured_codes(change, codes):
+    def bad(body):
+        return completion([tool_call("a1", ANSWER_TOOL, apple_draft(body, **change))])
+
+    run = run_with(compare_then(bad, completion(content=None)))
+    assert run.draft_rejections == [codes]
+
+
+@pinned
+def test_prose_and_null_lists():
+    prose = run_with(compare_then(completion(content="Revenue grew a lot."),
+                                  completion(content=None)))  # fmt: skip
+    assert prose.draft_rejections == [["not_an_object"]]
+
+    def nulls(body):  # null optional lists carry no claim and are accepted as empty
+        return completion([tool_call("a1", ANSWER_TOOL, apple_draft(
+            body, citations=None, quotes=None, explanations=None))])  # fmt: skip
+
+    run = run_with(compare_then(nulls))
+    assert run.status == "drafted" and not run.repair_attempted and run.draft_rejections == []
+
+
+@pinned
+def test_an_invalid_draft_on_the_last_turn_is_not_repaired():
+    lookups = [completion([tool_call(f"r{i}", "resolve_company", {"identifier": "AAPL"})])
+               for i in range(5)]  # fmt: skip
+    provider = FakeProvider([*lookups, completion([tool_call("a", ANSWER_TOOL, {"answer": "{x}"})]),
+                             completion(content="never requested")])  # fmt: skip
+    run = run_with(provider)
+    assert run.status == "invalid_draft" and len(provider.requests) == MAX_MODEL_TURNS
+    assert run.draft_rejections == [["placeholder_mismatch"]] and not run.repair_attempted
+
+
+@pinned
+def test_repair_diagnostics_carry_codes_only(no_env_file, monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("LLM_API_KEY", KEY)
+    monkeypatch.setenv("LLM_MODEL", "test-model")
+    secret_text = "Revenue rose because of a confidential reason {change}."
+
+    def bad(body):
+        return completion([tool_call("a1", ANSWER_TOOL, apple_draft(body, answer=secret_text))])
+
+    output = tmp_path / "live.json"
+    provider = compare_then(bad, completion(content=None))
+    code = live_agent.main(["eval", "--cases", "apple-fy2026-revenue", "--output", str(output)],
+                           transport=httpx.MockTransport(provider))  # fmt: skip
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "draft rejected: placeholder_mismatch" in captured.out
+    assert "finish_reason=stop" in captured.out
+    everything = captured.out + captured.err + output.read_text()
+    for leaked in (KEY, "Bearer", "confidential reason", "{change}"):
+        assert leaked not in everything
+
+
+@pinned
+def test_an_unreturned_citation_is_answered_as_the_submit_answer_result():
+    forged = "sec-psg:invented-citation"
+
+    def search(body):
+        cid = tool_output(body, "c1")["output"]["comparison_id"]
+        return completion([tool_call("s1", "search_commentary", {"comparison_id": cid})])
+
+    def bad(body):
+        return completion([tool_call("a1", ANSWER_TOOL, apple_draft(body, citations=[forged]))])
+
+    def repaired(body):
+        result = tool_output(body, "a1")
+        assert result["error"]["codes"] == ["citation_not_returned"]
+        returned = tool_output(body, "s1")["output"]["evidence"]
+        assert returned[0]["citation_id"] in result["error"]["message"]
+        assert forged not in result["error"]["message"]
+        assert [t["function"]["name"] for t in body["tools"]] == [ANSWER_TOOL]
+        return completion([tool_call("a2", ANSWER_TOOL, apple_draft(
+            body, citations=[returned[0]["citation_id"]]))])  # fmt: skip
+
+    run = run_with(compare_then(search, bad, repaired),
+                   question="Why did Apple's revenue grow in fiscal 2026?")  # fmt: skip
+    assert run.status == "drafted" and run.draft_rejections == [["citation_not_returned"]]
+    assert ground(run, data=DATA, cache_dir=CACHE).status == "complete"

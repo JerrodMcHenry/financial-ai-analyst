@@ -21,8 +21,9 @@ separately. M3.4 joins them with BM25 retrieval into one evidence-backed analysi
 B1 adds a provider-independent tool-calling loop, tested with a scripted fake model, that
 produces unvalidated answer drafts. M3.5 B2 validates those drafts deterministically and renders
 the published answer on the server (complete, partial or abstained), with a 26-case offline
-evaluation. M3.6 B1 adds an OpenAI-compatible live provider adapter and a live CLI; it
-has not yet been run against a real provider. See [docs/architecture.md](docs/architecture.md) and
+evaluation. M3.6 adds an OpenAI-compatible live provider adapter and a live CLI. M3.6 B3.1
+repairs drafts through the answer tool and, before publishing, checks that the answer's
+comparison matches the company, metric and periods read independently from the question. See [docs/architecture.md](docs/architecture.md) and
 [docs/decisions.md](docs/decisions.md).
 
 ## Requirements
@@ -321,7 +322,8 @@ commentary. The model's own wording and explanations are withheld, because cause
 verified mechanically. Details: [docs/architecture.md](docs/architecture.md) §3.2n.
 
 ```bash
-uv run python -m financial_analyst.agent_eval    # 26 labeled cases, scripted models, offline
+uv run python -m financial_analyst.agent_eval    # v1: 26 cases, frozen path-specific labels
+uv run python -m financial_analyst.agent_eval --dataset evals/agent_v2.json   # v2: 28 outcome-labeled cases
 ```
 
 The evaluation tests the pipeline under fixed model behaviors (good, bad and adversarial).
@@ -348,7 +350,12 @@ uv run python -m financial_analyst.live_agent eval --all --output live.json   # 
 
 These commands send requests to the provider and may cost money. A question makes at most
 6 requests, and each one resends the conversation so far, including tool outputs. Only the
-server-rendered, grounded answer is printed, never the model's draft. Without a key or model
+server-rendered, grounded answer is printed, never the model's draft. An answer is
+published only if its comparison matches the company, metric and periods read from the
+question by fixed patterns (`request_scope.py`); otherwise it abstains. Segment and product
+metrics ("iPhone net sales") are not supported and abstain. A question that asks only for
+figures is complete without commentary; one that asks why, what drove a change, or what
+management said needs a verified citation (and a quotation, if one is asked for). Without a key or model
 the command names the missing setting and sends nothing. `uv run pytest` never contacts a
 provider: the adapter is tested against mocked responses. Details:
 [docs/architecture.md](docs/architecture.md) §3.2o.

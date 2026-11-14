@@ -27,7 +27,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from financial_analyst.agent import (
     MAX_MODEL_TURNS,
@@ -41,6 +41,7 @@ from financial_analyst.agent import (
 )
 from financial_analyst.analysis import PinnedData, load_pinned_data
 from financial_analyst.config import Settings
+from financial_analyst.financial_tools import PeriodRequest
 from financial_analyst.grounding import GroundedAnswer, ground
 
 DEFAULT_DATASET = Path("evals/agent_v1.json")
@@ -91,7 +92,7 @@ class AgentEvalDataset(_Strict):
 
 class CaseResult(BaseModel):
     id: str
-    category: Category
+    category: str
     status: str
     expected_status: str
     checks: dict[str, bool]  # metric name -> passed, only for metrics that apply
@@ -303,6 +304,194 @@ def evaluate(dataset: AgentEvalDataset, data: PinnedData, cache_dir: Path) -> Ag
                            metrics=metrics, results=results)  # fmt: skip
 
 
+# --- Outcome-based evaluation v2 (M3.7) ---------------------------------------------------------
+#
+# agent_v1.json stays frozen. agent_v2.json labels the information need, not a model's path:
+# whether the question is answerable from the pinned data, its scope and figures, whether it
+# asks for commentary or a quotation, and which published statuses meet the need. Each
+# dimension is scored on its own; no internal tool-error path is required.
+
+DEFAULT_DATASET_V2 = Path("evals/agent_v2.json")
+CategoryV2 = Literal["figures", "paraphrase", "commentary", "unsupported", "unanswerable",
+                     "ambiguous", "injection"]  # fmt: skip
+Status = Literal["complete", "partial", "abstained"]
+
+
+class ScopeLabel(_Strict):
+    cik: str
+    metric: str
+    current: PeriodRequest
+    prior: PeriodRequest
+
+
+class FiguresLabel(_Strict):
+    current: ExpectedValue
+    prior: ExpectedValue
+    delta: str
+    percent: str  # signed display, e.g. "+15.1%"
+
+
+class ExpectedV2(_Strict):
+    answerable: bool  # the pinned data can answer the question as asked
+    scope: ScopeLabel | None = None
+    figures: FiguresLabel | None = None
+    requires_commentary: bool = False
+    requires_quotation: bool = False
+    acceptable_statuses: list[Status] = Field(min_length=1)
+    commentary_accession: str | None = None  # where any published citation must come from
+    forbidden_text: list[str] = []
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "ExpectedV2":
+        if self.answerable != (self.scope is not None and self.figures is not None):
+            raise ValueError("answerable cases need scope and figures; others have neither")
+        if not self.answerable and self.acceptable_statuses != ["abstained"]:
+            raise ValueError("an unanswerable case is met only by abstaining")
+        if self.answerable and "abstained" in self.acceptable_statuses:
+            raise ValueError("abstaining never meets an answerable question")
+        return self
+
+
+class EvalCaseV2(_Strict):
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    category: CategoryV2
+    question: str
+    script: list[dict[str, Any]] = Field(min_length=1)  # offline only; ignored live
+    expected: ExpectedV2
+    note: str = ""
+
+
+class AgentEvalDatasetV2(_Strict):
+    spec: Literal["agent_v2"]
+    dataset_version: str
+    description: str
+    cases: list[EvalCaseV2] = Field(min_length=1)
+
+
+METRICS_V2 = ("question_answered", "numeric", "context", "citation_integrity", "abstention",
+              "status", "reliability", "budget", "safe_content", "deterministic")  # fmt: skip
+
+
+def score_v2(
+    case: EvalCaseV2, run: AgentRunResult, answer: GroundedAnswer
+) -> tuple[dict[str, bool], list[str]]:
+    """Score one run against the information need, one dimension at a time."""
+    expected = case.expected
+    checks: dict[str, bool] = {}
+    failures: list[str] = []
+
+    def check(name: str, passed: bool, why: str) -> None:
+        checks[name] = passed
+        if not passed:
+            failures.append(f"{name}: {why}")
+
+    published = answer.current is not None
+    check("status", answer.status in expected.acceptable_statuses,
+          f"{answer.status}, acceptable {expected.acceptable_statuses}")  # fmt: skip
+    check("abstention", (answer.status == "abstained") == (not expected.answerable),
+          f"{answer.status} for {'an answerable' if expected.answerable else 'an unanswerable'} "
+          "question")  # fmt: skip
+    check("reliability", run.status == "drafted", f"run ended {run.status}")
+    check("budget", len(run.tool_results) <= MAX_TOOL_CALLS and run.model_turns <= MAX_MODEL_TURNS,
+          f"{len(run.tool_results)} calls, {run.model_turns} turns")  # fmt: skip
+    if expected.answerable:
+        in_scope = published and _scope_matches(run, answer, expected.scope)
+        where = "for the asked scope" if in_scope else "missing or for another scope"
+        check("question_answered", in_scope and answer.status in expected.acceptable_statuses,
+              f"{answer.status}; figures {where}")  # fmt: skip
+    if published and expected.figures is not None:
+        f = expected.figures
+        got = (str(answer.current.value), str(answer.prior.value), str(answer.delta),
+               answer.percent.display)  # fmt: skip
+        want = (f.current.value, f.prior.value, f.delta, f.percent)
+        check("numeric", got == want, f"{got}, expected {want}")
+        sides = ((answer.current, f.current), (answer.prior, f.prior))
+        context = _scope_matches(run, answer, expected.scope) and all(
+            _period_of(run, rendered) == (label.start, label.end) for rendered, label in sides
+        )
+        check("context", context, f"{answer.company} {answer.metric}")
+    if answer.citations or answer.quotations:
+        check("citation_integrity", _citations_intact(run, answer, expected.commentary_accession),
+              f"{[c.accession_number for c in answer.citations]}, "
+              f"{len(answer.quotations)} quotation(s)")  # fmt: skip
+    if expected.forbidden_text:
+        text = answer.model_dump_json(exclude={"issues", "withheld", "question"})
+        leaked = [t for t in expected.forbidden_text if t in text]
+        check("safe_content", not leaked, f"published {leaked}")
+    return checks, failures
+
+
+def _scope_matches(run: AgentRunResult, answer: GroundedAnswer, scope: ScopeLabel | None) -> bool:
+    if scope is None or answer.provenance is None:
+        return False
+    comparison = run.evidence.comparisons[answer.provenance.comparison_id]
+    return (comparison.cik, comparison.metric, comparison.current.period.request,
+            comparison.prior.period.request) == (scope.cik, scope.metric, scope.current,
+                                                 scope.prior)  # fmt: skip
+
+
+def _citations_intact(run: AgentRunResult, answer: GroundedAnswer, accession: str | None) -> bool:
+    """Every published citation is a passage this run returned, from the expected filing, and
+    every published quotation is an exact substring of its cited passage."""
+    passages = run.evidence.passages
+    for citation in answer.citations:
+        if citation.citation_id not in passages:
+            return False
+        if accession is not None and citation.accession_number != accession:
+            return False
+    return all(
+        q.citation_id in passages and q.text in passages[q.citation_id].passage.text
+        for q in answer.quotations
+    )
+
+
+def score_case_v2(case: EvalCaseV2, data: PinnedData, cache_dir: Path) -> CaseResult:
+    runs = [_run_v2(case, data, cache_dir) for _ in range(2)]
+    (run, answer), (again_run, again_answer) = runs
+    checks, failures = score_v2(case, run, answer)
+    checks["deterministic"] = (run.model_dump(), answer.model_dump()) == (
+        again_run.model_dump(), again_answer.model_dump()
+    )  # fmt: skip
+    if not checks["deterministic"]:
+        failures.append("deterministic: a second run differed")
+    return CaseResult(
+        id=case.id, category=case.category, status=answer.status,
+        expected_status="/".join(case.expected.acceptable_statuses), checks=checks,
+        failures=failures,
+    )  # fmt: skip
+
+
+def _run_v2(case: EvalCaseV2, data: PinnedData, cache_dir: Path):
+    run = run_agent(case.question, scripted_model(case.script), data=data, cache_dir=cache_dir)
+    return run, ground(run, data=data, cache_dir=cache_dir)
+
+
+def evaluate_v2(dataset: AgentEvalDatasetV2, data: PinnedData, cache_dir: Path) -> AgentEvalReport:
+    results = [score_case_v2(case, data, cache_dir) for case in dataset.cases]
+    return AgentEvalReport(dataset_version=dataset.dataset_version, cases=len(results),
+                           metrics=rates(results, METRICS_V2), results=results)  # fmt: skip
+
+
+def rates(results, names) -> dict[str, tuple[int, int]]:
+    return {
+        name: (sum(r.checks[name] for r in results if name in r.checks),
+               sum(name in r.checks for r in results))
+        for name in names
+    }  # fmt: skip
+
+
+def load_dataset_v2(path: Path) -> AgentEvalDatasetV2:
+    dataset = AgentEvalDatasetV2.model_validate_json(path.read_text(encoding="utf-8"))
+    ids = [c.id for c in dataset.cases]
+    if len(set(ids)) != len(ids):
+        raise ValueError("case ids must be unique")
+    return dataset
+
+
+def is_v2(path: Path) -> bool:
+    return json.loads(path.read_text(encoding="utf-8")).get("spec") == "agent_v2"
+
+
 def load_dataset(path: Path) -> AgentEvalDataset:
     dataset = AgentEvalDataset.model_validate_json(path.read_text(encoding="utf-8"))
     ids = [c.id for c in dataset.cases]
@@ -312,7 +501,10 @@ def load_dataset(path: Path) -> AgentEvalDataset:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """python -m financial_analyst.agent_eval [--dataset FILE] [--output FILE]"""
+    """python -m financial_analyst.agent_eval [--dataset FILE] [--output FILE]
+
+    The dataset may be agent_v1.json (frozen, path-specific labels) or agent_v2.json
+    (outcome-based labels), recognized by its "spec" field."""
     parser = argparse.ArgumentParser(prog="python -m financial_analyst.agent_eval")
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
@@ -322,8 +514,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, help="write the full JSON report here")
     args = parser.parse_args(argv)
     try:
-        dataset = load_dataset(args.dataset)
-        report = evaluate(dataset, load_pinned_data(args.manifest, args.cache_dir), args.cache_dir)
+        data = load_pinned_data(args.manifest, args.cache_dir)
+        if is_v2(args.dataset):
+            report = evaluate_v2(load_dataset_v2(args.dataset), data, args.cache_dir)
+        else:
+            report = evaluate(load_dataset(args.dataset), data, args.cache_dir)
     except Exception as exc:  # noqa: BLE001 - report the problem and stop
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2

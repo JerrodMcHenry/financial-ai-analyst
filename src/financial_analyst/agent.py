@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 
 from financial_analyst.analysis import (
     DEFAULT_K,
@@ -48,7 +49,8 @@ from financial_analyst.financial_tools import (
     resolve_period,
 )
 
-AGENT_VERSION = "4"  # 4: attribution rule in the prompt; 3: six turns, workflow prompt
+ANSWER_TOOL = "submit_answer"  # the provider function that carries an answer draft
+AGENT_VERSION = "6"  # 6: commentary when asked, citation feedback; 5: repair protocol
 MAX_TOOL_CALLS = 6
 MAX_MODEL_TURNS = 6  # a repair counts as a turn
 RUN_TIMEOUT_SECONDS = 90.0
@@ -67,15 +69,19 @@ Workflow:
    quarters are not reported separately); fiscal_year_end or fiscal_quarter_end for balances
    such as total assets.
 2. Call compare to get the authoritative figures for the two periods.
-3. If the question is about a change, call search_commentary with that comparison_id before
-   answering. Skip it only when the question clearly needs no commentary. If it returns no
-   evidence, do not search again: answer with the figures alone.
+3. If the question asks for commentary (why, what drove or explains a change, what the
+   company, management or filing said or described, MD&A, or a quotation), call
+   search_commentary with that comparison_id before answering. A question that only asks for
+   the figures needs no search. If a search returns no evidence, do not search again: answer
+   with the figures alone.
 4. Submit the answer draft (the submit_answer function) alone. Set subject to the
    comparison_id. Write no digits in the answer: write {placeholder} and map each placeholder
    to a value_id returned by a tool; {company}, {metric}, {current_period} and {prior_period}
-   are filled in for you. Cite passages only by citation_id from search_commentary, and quote
-   at most three short verbatim excerpts. Put any interpretation or cause in explanations,
-   never in the answer: retrieved passages are candidates, not proof of a cause.
+   are filled in for you. Cite a passage only by a citation_id that search_commentary
+   returned in this conversation, copied exactly, character for character: never shorten,
+   edit or construct one. Quote at most three short verbatim excerpts. Put any
+   interpretation or cause in explanations, never in the answer: retrieved passages are
+   candidates, not proof of a cause.
 5. Quotation attribution: use "management" only when the quoted passage's section, as
    returned by search_commentary, is a reliable MD&A label: "Item 7" in a 10-K or
    "Part I, Item 2" in a 10-Q. Otherwise use "filing". A passage whose section is null is
@@ -132,11 +138,16 @@ class ModelTurn(BaseModel):
 
     tool_calls: list[ToolCall] = []
     answer: Any = None  # the raw structured output; validated as an AnswerDraft by the loop
+    # When the answer arrived as a call to the answer tool, that call's id, so the call and
+    # any rejection of it are replayed to the provider as a call and its result.
+    answer_call_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
 
     @model_validator(mode="after")
     def _one_kind(self) -> "ModelTurn":
         if bool(self.tool_calls) == (self.answer is not None):
             raise ValueError("a model turn must contain either tool calls or an answer")
+        if self.answer_call_id is not None and self.answer is None:
+            raise ValueError("answer_call_id belongs to an answer")
         if len({call.id for call in self.tool_calls}) != len(self.tool_calls):
             raise ValueError("tool call ids must be unique within a turn")
         return self
@@ -239,19 +250,88 @@ class AnswerDraft(_Draft):
     quotes: list[Quote] = Field(default=[], max_length=3)
     explanations: list[Explanation] = Field(default=[], max_length=3)
 
+    @field_validator("values", "citations", "quotes", "explanations", mode="before")
+    @classmethod
+    def _null_is_empty(cls, value: Any) -> Any:
+        # Non-strict tool calling does not enforce the schema; a null optional list carries
+        # no claim, so it means the same as an empty one.
+        return [] if value is None else value
+
     @model_validator(mode="after")
     def _placeholders_match(self) -> "AnswerDraft":
         used = set(PLACEHOLDER.findall(self.answer)) - RESERVED_PLACEHOLDERS
         declared = [v.placeholder for v in self.values]
         if len(set(declared)) != len(declared):
-            raise ValueError("each placeholder may be declared once")
+            raise PydanticCustomError(
+                "duplicate_placeholder", "each placeholder may be declared once"
+            )
         if RESERVED_PLACEHOLDERS & set(declared):
-            raise ValueError(f"{sorted(RESERVED_PLACEHOLDERS)} are filled by the server")
+            raise PydanticCustomError(
+                "reserved_placeholder",
+                "{company}, {metric}, {current_period} and {prior_period} are filled by the "
+                "server and must not be declared in values",
+            )
         if used != set(declared):
-            raise ValueError(
-                f"placeholders used {sorted(used)} must equal those declared {sorted(declared)}"
+            raise PydanticCustomError(
+                "placeholder_mismatch",
+                "every {placeholder} in answer must be declared in values, and every declared "
+                "placeholder must appear in answer",
             )
         return self
+
+
+_DRAFT_FIELDS = frozenset().union(
+    *(m.model_fields for m in (AnswerDraft, ValueRef, Quote, Explanation))
+)
+_DRAFT_RULES = frozenset({"duplicate_placeholder", "reserved_placeholder", "placeholder_mismatch"})
+
+
+def draft_rejection_codes(exc: ValidationError) -> list[str]:
+    """Structured codes for a rejected draft: the error type and the schema path, with any
+    name the model invented replaced by "?". Never the draft's text or values."""
+    codes: list[str] = []
+    for error in exc.errors():
+        kind, loc = error["type"], error["loc"]
+        if kind == "extra_forbidden":
+            code = "extra_field"
+        elif kind in ("model_type", "model_attributes_type") and not loc:
+            code = "not_an_object"
+        elif kind in _DRAFT_RULES:
+            code = kind
+        else:
+            path = ".".join(str(p) if isinstance(p, int) or p in _DRAFT_FIELDS else "?"
+                            for p in loc)  # fmt: skip
+            code = f"{kind}:{path or 'draft'}"
+        if code not in codes:
+            codes.append(code)
+    return codes
+
+
+def _cited(draft: AnswerDraft) -> list[str]:
+    """Every citation id the draft uses: citations, quotes and explanations."""
+    ids = draft.citations + [q.citation_id for q in draft.quotes]
+    ids += [e.citation_id for e in draft.explanations if e.citation_id]
+    return list(dict.fromkeys(ids))
+
+
+def _citation_problems(count: int, returned: list[str]) -> str:
+    """Feedback for citations the run never returned: how many, and the ids that may be
+    cited (this run's own search results), never the unreturned ids themselves."""
+    if not returned:
+        return (f"citations: {count} cited id(s) were not returned by search_commentary in this "
+                "run, and no passage was returned, so cite nothing")  # fmt: skip
+    return (f"citations: {count} cited id(s) were not returned by search_commentary in this "
+            f"run; cite only these ids, copied exactly: {', '.join(returned)}")  # fmt: skip
+
+
+def _draft_problems(exc: ValidationError) -> str:
+    """The rejection for the model to correct: schema path and message, no input values."""
+    problems = []
+    for error in exc.errors():
+        path = ".".join(str(p) if isinstance(p, int) or p in _DRAFT_FIELDS else "?"
+                        for p in error["loc"])  # fmt: skip
+        problems.append(f"{path or 'draft'}: {error['msg']}")
+    return "; ".join(problems)[:800]
 
 
 # --- Tools ------------------------------------------------------------------------------------
@@ -349,6 +429,7 @@ class RunEvidence(BaseModel):
     comparisons: dict[str, Comparison] = {}
     facts: dict[str, Fact] = {}
     passages: dict[str, RunPassage] = {}
+    searches: list[str] = []  # comparison_ids searched successfully, with or without evidence
 
 
 class _ToolFailure(Exception):
@@ -366,6 +447,7 @@ class _RunState:
         self.comparisons: dict[str, Comparison] = {}
         self.facts: dict[str, Fact] = {}  # get_fact results, by value_id (observation_id)
         self.passages: dict[str, RunPassage] = {}  # search_commentary evidence, by citation id
+        self.searches: list[str] = []  # comparison_ids searched successfully
 
     def company(self, cik: str, metric: Metric | None = None):
         if cik not in self.data.companies:
@@ -474,6 +556,8 @@ def _search_commentary(args: SearchCommentaryArgs, state: _RunState) -> dict:
         ],  # fmt: skip
         "reasons": reasons,
     }
+    if args.comparison_id not in state.searches:
+        state.searches.append(args.comparison_id)
     for item in evidence:
         state.passages[item.citation_id] = RunPassage(
             comparison_id=args.comparison_id, passage=item
@@ -573,6 +657,7 @@ class AgentRunResult(BaseModel):
     model_turns: int
     repair_attempted: bool
     error: str | None
+    draft_rejections: list[list[str]] = []  # codes per rejected draft (draft_rejection_codes)
     evidence: RunEvidence = RunEvidence()
     version: str = AGENT_VERSION
 
@@ -597,6 +682,7 @@ def run_agent(
         Message(role="user", content=question),
     ]
     results: list[ToolResult] = []
+    rejections: list[list[str]] = []
     turns = 0
     repairs = 0
     deadline = clock() + RUN_TIMEOUT_SECONDS
@@ -605,8 +691,9 @@ def run_agent(
         return AgentRunResult(
             status=status, question=question, draft=draft, tool_results=results,
             messages=messages, model_turns=turns, repair_attempted=repairs > 0, error=error,
+            draft_rejections=rejections,
             evidence=RunEvidence(comparisons=state.comparisons, facts=state.facts,
-                                 passages=state.passages),
+                                 passages=state.passages, searches=state.searches),
         )  # fmt: skip
 
     while True:
@@ -616,26 +703,50 @@ def run_agent(
             return finish("timeout", f"run exceeded {RUN_TIMEOUT_SECONDS:g} seconds")
         turns += 1
         try:
-            turn = ModelTurn.model_validate(model.complete(list(messages), TOOL_SPECS))
+            # A repair turn offers no tools: only the answer tool (or a text answer) is allowed.
+            tools = [] if repairs else TOOL_SPECS
+            turn = ModelTurn.model_validate(model.complete(list(messages), tools))
         except Exception as exc:  # noqa: BLE001 - any model or adapter failure ends the run
             return finish("model_error", f"{type(exc).__name__}: {str(exc)[:300]}")
         if clock() >= deadline:
             return finish("timeout", f"run exceeded {RUN_TIMEOUT_SECONDS:g} seconds")
 
         if turn.answer is not None:
-            messages.append(Message(role="assistant", content=_json(turn.answer)))
+            call_id = turn.answer_call_id
+            if call_id:  # replay the answer as the call it was, so its result can answer it
+                answer_call = ToolCall(id=call_id, name=ANSWER_TOOL, arguments=turn.answer)
+                messages.append(Message(role="assistant", tool_calls=[answer_call]))
+            else:
+                messages.append(Message(role="assistant", content=_json(turn.answer)))
+            can_repair = repairs < MAX_REPAIRS and turns < MAX_MODEL_TURNS
             try:
-                return finish("drafted", draft=AnswerDraft.model_validate(turn.answer))
+                draft = AnswerDraft.model_validate(turn.answer)
             except ValidationError as exc:
-                problems = "; ".join(e["msg"] for e in exc.errors())[:600]
-                if repairs >= MAX_REPAIRS or turns >= MAX_MODEL_TURNS:
-                    return finish("invalid_draft", f"answer draft rejected: {problems}")
-                repairs += 1
-                messages.append(Message(role="user", content=(
-                    f"Your answer draft is invalid: {problems}. Reply with a corrected answer "
-                    "draft only; do not call tools."
-                )))  # fmt: skip
-                continue
+                draft, codes, problems = None, draft_rejection_codes(exc), _draft_problems(exc)
+            if draft is not None:
+                unreturned = [c for c in _cited(draft) if c not in state.passages]
+                # Without a repair left, the draft stands and grounding rejects those citations.
+                if not unreturned or not can_repair:
+                    return finish("drafted", draft=draft)
+                codes = ["citation_not_returned"]
+                problems = _citation_problems(len(unreturned), sorted(state.passages))
+            # A rejected draft: repair once, if a turn remains.
+            rejections.append(codes)
+            if not can_repair:
+                return finish("invalid_draft", f"answer draft rejected: {', '.join(codes)}")
+            repairs += 1
+            feedback = (
+                f"Your answer draft is invalid: {problems}. Submit one corrected answer "
+                f"draft with {ANSWER_TOOL} now. No other tool may be called in this turn."
+            )
+            if call_id:
+                body = {"ok": False, "error": {"code": "invalid_draft", "codes": codes,
+                                               "message": feedback}}  # fmt: skip
+                messages.append(Message(role="tool", tool_call_id=call_id,
+                                        content=json.dumps(body, sort_keys=True)))  # fmt: skip
+            else:
+                messages.append(Message(role="user", content=feedback))
+            continue
 
         if repairs:
             return finish("invalid_draft", "the repair turn requested tools instead of an answer")

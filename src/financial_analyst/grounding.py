@@ -36,8 +36,9 @@ from financial_analyst.passages import (
     parse_citation_id,
     verify_citations,
 )
+from financial_analyst.request_scope import RequestScope, capture_scope, check_subject
 
-GROUNDING_VERSION = "1"
+GROUNDING_VERSION = "2"  # 2: commentary required only when asked; request scope
 _PREVIEW_CHARS = 240
 
 IssueCode = Literal[
@@ -48,6 +49,8 @@ IssueCode = Literal[
     "value_not_in_run",  # unknown, invented, stale or other-run value_id
     "value_context_mismatch",  # a value for another company, metric or period
     "raw_number_in_text",  # digits in the narrative instead of placeholders
+    "scope_unresolved",  # the question's company, metric or periods cannot be read reliably
+    "scope_mismatch",  # the subject comparison answers another question
     # Only the item is rejected (the answer is at most partial):
     "citation_not_in_run",  # not a verified passage returned by search_commentary here
     "citation_out_of_scope",  # from another comparison's (company's, filing's) search
@@ -58,7 +61,7 @@ IssueCode = Literal[
 ]
 _ABSTAIN = frozenset(
     {"run_not_drafted", "missing_subject", "subject_not_in_run", "value_not_in_run",
-     "value_context_mismatch", "raw_number_in_text"}
+     "value_context_mismatch", "raw_number_in_text", "scope_unresolved", "scope_mismatch"}
 )  # fmt: skip
 
 LIMITATIONS = (
@@ -105,6 +108,7 @@ class GroundingReport(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     subject: Comparison | None
+    scope: RequestScope | None  # what the question asks, read from its text (request_scope)
     citations: list[RunPassage]  # grounded, re-checked candidate passages, in draft order
     quotes: list[GroundedQuote]
     issues: list[ValidationIssue]
@@ -116,7 +120,11 @@ class GroundingReport(BaseModel):
 
 
 def validate_draft(
-    run: AgentRunResult, cache_dir: Path, *, full_reverify: bool = False
+    run: AgentRunResult,
+    cache_dir: Path,
+    *,
+    full_reverify: bool = False,
+    scope: RequestScope | None = None,
 ) -> GroundingReport:
     """Check a run's draft against the run's evidence. Never raises for bad drafts.
 
@@ -124,6 +132,9 @@ def validate_draft(
     source, and the citation id must still describe the passage text the run returned.
     The run's search already rebuilt and verified every passage in this process;
     full_reverify=True repeats that rebuild (verify_citations).
+
+    With a scope (ground always passes one), the subject comparison must match the company,
+    metric and periods read independently from the question; otherwise the answer abstains.
     """
     draft, evidence = run.draft, run.evidence
     issues: list[ValidationIssue] = []
@@ -133,8 +144,8 @@ def validate_draft(
 
     def report(subject=None, citations=(), quotes=(), withheld=()) -> GroundingReport:
         return GroundingReport(
-            subject=subject, citations=list(citations), quotes=list(quotes), issues=issues,
-            withheld=list(withheld),
+            subject=subject, scope=scope, citations=list(citations), quotes=list(quotes),
+            issues=issues, withheld=list(withheld),
         )  # fmt: skip
 
     if run.status != "drafted" or draft is None:
@@ -154,6 +165,11 @@ def validate_draft(
     if subject is None:
         flag("subject_not_in_run", draft.subject, "no compare call in this run produced it")
         return report(withheld=withheld)
+    if scope is not None:
+        problems = check_subject(scope, subject)
+        if problems:
+            code = "scope_unresolved" if scope.status != "resolved" else "scope_mismatch"
+            flag(code, subject.comparison_id, "; ".join(problems))
 
     for value in draft.values:
         problem = _value_problem(value.value_id, subject, evidence.comparisons, evidence.facts)
@@ -366,6 +382,7 @@ class GroundedAnswer(BaseModel):
     delta: Decimal | None
     delta_formatted: str | None
     percent: RenderedPercent | None
+    request_scope: RequestScope | None  # what the question asks, read from its text
     statement: str | None  # the server-rendered financial statement
     provenance: Provenance | None
     citations: list[RenderedCitation]  # candidate commentary
@@ -381,19 +398,25 @@ class GroundedAnswer(BaseModel):
 
 
 def ground(run: AgentRunResult, *, data: PinnedData, cache_dir: Path) -> GroundedAnswer:
-    """Validate a run's draft and render the answer."""
-    return render_answer(run, validate_draft(run, cache_dir), data)
+    """Read the request scope from the question, validate the run's draft against the run's
+    evidence and that scope, and render the answer."""
+    scope = capture_scope(run.question, data)
+    return render_answer(run, validate_draft(run, cache_dir, scope=scope), data)
 
 
 def render_answer(run: AgentRunResult, report: GroundingReport, data: PinnedData) -> GroundedAnswer:
     """Build the published answer from the run's evidence and the validation report.
 
-    abstained: no valid subject, or any numeric problem; no figures are shown.
-    complete: valid figures, at least one grounded citation, and no issues.
-    partial: valid figures, but no grounded commentary or some citations or quotes rejected.
+    abstained: no valid subject, a numeric or request-scope problem; no figures are shown.
+    complete: valid figures and no issues; when the question asks for commentary, also a
+        commentary search for this comparison and at least one grounded citation; when it
+        asks for a quotation, also a verified quotation.
+    partial: valid figures, but required commentary or quotation missing, or some citations
+        or quotations rejected. Citations shown are always grounded, whether or not asked.
     """
     base = {
         "question": run.question, "issues": report.issues, "withheld": report.withheld,
+        "request_scope": report.scope,
         "run_status": run.status, "tool_calls": len(run.tool_results),
         "model_turns": run.model_turns,
     }  # fmt: skip
@@ -435,8 +458,18 @@ def render_answer(run: AgentRunResult, report: GroundingReport, data: PinnedData
     ]  # fmt: skip
 
     warnings = []
-    if not citations:
-        warnings.append("no verified candidate commentary from the commentary filing")
+    scope = report.scope
+    needs_commentary = bool(scope and scope.commentary_required)
+    needs_quotation = bool(scope and scope.quotation_requested)
+    searched = comparison.comparison_id in run.evidence.searches
+    if needs_commentary and not searched:
+        warnings.append("the question asks for commentary, but no commentary search was made "
+                        "for this comparison")  # fmt: skip
+    elif needs_commentary and not citations:
+        warnings.append("the question asks for commentary, but no verified passage was found "
+                        "in the commentary filing")  # fmt: skip
+    if needs_quotation and not quotations:
+        warnings.append("the question asks for a quotation, but none was verified")
     if percent.status != "computed":
         warnings.append(percent.note)
     if change.sign_change != "none":
@@ -460,7 +493,9 @@ def render_answer(run: AgentRunResult, report: GroundingReport, data: PinnedData
         warnings.append("the model's explanations are withheld: causes are not verified")
 
     return GroundedAnswer(
-        status="complete" if citations and not report.issues else "partial",
+        status="complete"
+        if _complete(report, needs_commentary, citations, needs_quotation, quotations)
+        else "partial",  # fmt: skip
         company=f"{name} (CIK {comparison.cik})",
         cik=comparison.cik,
         metric=comparison.metric,
@@ -492,6 +527,17 @@ def render_answer(run: AgentRunResult, report: GroundingReport, data: PinnedData
         warnings=warnings,
         **base,
     )
+
+
+def _complete(report, needs_commentary, citations, needs_quotation, quotations) -> bool:
+    """Valid figures and no issue; plus, only when the question asks for them, at least one
+    grounded citation and a verified quotation. A grounded citation exists only if this run
+    searched the subject comparison's commentary filing, so it also proves the search."""
+    if report.issues:
+        return False
+    if needs_commentary and not citations:
+        return False
+    return not (needs_quotation and not quotations)
 
 
 def format_amount(value: Decimal, unit: str, signed: bool = False) -> str:

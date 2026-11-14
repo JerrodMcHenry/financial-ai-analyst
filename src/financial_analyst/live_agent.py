@@ -25,8 +25,18 @@ from pathlib import Path
 import httpx
 from pydantic import BaseModel
 
-from financial_analyst.agent import AgentRunResult, run_agent
-from financial_analyst.agent_eval import DEFAULT_DATASET, EvalCase, check_case, load_dataset
+from financial_analyst.agent import ANSWER_TOOL, AgentRunResult, run_agent
+from financial_analyst.agent_eval import (
+    DEFAULT_DATASET,
+    METRICS_V2,
+    EvalCase,
+    EvalCaseV2,
+    check_case,
+    is_v2,
+    load_dataset,
+    load_dataset_v2,
+    score_v2,
+)
 from financial_analyst.analysis import PinnedData, load_pinned_data
 from financial_analyst.config import Settings
 from financial_analyst.grounding import GroundedAnswer, ground
@@ -40,6 +50,7 @@ from financial_analyst.llm_provider import (
 
 DEFAULT_MANIFEST = Path("evals/sec_snapshots_v1.json")
 SMOKE_CASES = ("apple-fy2026-revenue", "jpm-q3-2026-net-income")
+SMOKE_CASES_V2 = ("v2-apple-fy-revenue", "v2-jpm-q3-net-income")
 # Adversarial cases script a misbehaving model; only the one whose attack is in the question
 # itself means anything for a live model.
 QUESTION_DRIVEN_ADVERSARIAL = frozenset({"prompt-injection-in-question"})
@@ -60,6 +71,7 @@ class RunDiagnostics(BaseModel):
     model_turns: int
     terminal_reason: str  # the run status, with the loop's reason when it did not draft
     reached: dict[str, bool]  # compare / search_commentary succeeded; submit_answer attempted
+    draft_rejections: list[list[str]]  # structural rejection codes per rejected draft
     issue_codes: list[str]  # grounding validation issues
 
 
@@ -76,9 +88,14 @@ def diagnose(run: AgentRunResult, answer: GroundedAnswer) -> RunDiagnostics:
         reached={
             "compare": "compare" in succeeded,
             "search_commentary": "search_commentary" in succeeded,
-            # An answer turn was produced (valid or not): an assistant message without calls.
-            "submit_answer": any(m.role == "assistant" and not m.tool_calls for m in run.messages),
-        },  # fmt: skip
+            # An answer turn was produced (valid or not): a submit_answer call or a text answer.
+            "submit_answer": any(
+                m.role == "assistant"
+                and (not m.tool_calls or any(c.name == ANSWER_TOOL for c in m.tool_calls))
+                for m in run.messages
+            ),
+        },
+        draft_rejections=run.draft_rejections,
         issue_codes=[i.code for i in answer.issues],
     )
 
@@ -117,12 +134,16 @@ class LiveEvalReport(BaseModel):
     )
 
 
-def live_cases(cases: list[EvalCase], ids: list[str] | None, run_all: bool) -> list[EvalCase]:
-    eligible = [c for c in cases
-                if c.category != "adversarial" or c.id in QUESTION_DRIVEN_ADVERSARIAL]  # fmt: skip
+def live_cases(cases: list, ids: list[str] | None, run_all: bool) -> list:  # v1 or v2 cases
+    """v1: non-adversarial cases plus the question-driven injection case. v2: every case
+    (its scripts are ignored live). Defaults to the two smoke cases of that dataset."""
+    v2 = bool(cases) and isinstance(cases[0], EvalCaseV2)
+    eligible = cases if v2 else [
+        c for c in cases if c.category != "adversarial" or c.id in QUESTION_DRIVEN_ADVERSARIAL
+    ]  # fmt: skip
     if run_all:
         return eligible
-    wanted = list(ids or SMOKE_CASES)
+    wanted = list(ids or (SMOKE_CASES_V2 if v2 else SMOKE_CASES))
     known = {c.id: c for c in eligible}
     unknown = [i for i in wanted if i not in known]
     if unknown:
@@ -131,7 +152,7 @@ def live_cases(cases: list[EvalCase], ids: list[str] | None, run_all: bool) -> l
 
 
 def evaluate_live(
-    cases: list[EvalCase],
+    cases: list[EvalCase | EvalCaseV2],
     data: PinnedData,
     cache_dir: Path,
     model_factory: Callable[[], OpenAICompatibleModel],
@@ -145,10 +166,15 @@ def evaluate_live(
             run = run_agent(case.question, model, data=data, cache_dir=cache_dir)
             answer = ground(run, data=data, cache_dir=cache_dir)
             usage = model.usage()
-        checks, failures = check_case(case, run, answer)
+        if isinstance(case, EvalCaseV2):
+            checks, failures = score_v2(case, run, answer)
+            expected_status = "/".join(case.expected.acceptable_statuses)
+        else:
+            checks, failures = check_case(case, run, answer)
+            expected_status = case.expected.status
         results.append(LiveCaseResult(
             id=case.id, run_status=run.status, status=answer.status,
-            expected_status=case.expected.status, valid_tool_sequence=_valid_sequence(run),
+            expected_status=expected_status, valid_tool_sequence=_valid_sequence(run),
             grounding_pass=None if run.status != "drafted" else not answer.issues,
             checks=checks, failures=failures, tool_calls=len(run.tool_results),
             model_turns=run.model_turns, usage=usage, error=run.error,
@@ -159,26 +185,32 @@ def evaluate_live(
         applicable = [r.checks[name] for r in results if name in r.checks]
         return sum(applicable), len(applicable)
 
-    figures = [r for r in results if "numeric" in r.checks]
     drafted = [r for r in results if r.grounding_pass is not None]
+    shared = {
+        "valid_tool_sequence": (sum(r.valid_tool_sequence for r in results), len(results)),
+        "draft_success": (len(drafted), len(results)),
+        "grounding_pass": (sum(bool(r.grounding_pass) for r in drafted), len(drafted)),
+    }
+    if cases and isinstance(cases[0], EvalCaseV2):
+        metrics = shared | {name: rate(name) for name in METRICS_V2 if name != "deterministic"}
+    else:
+        figures = [r for r in results if "numeric" in r.checks]
+        metrics = shared | {
+            "financial_correct": (
+                sum(r.checks["numeric"] and r.checks["company_period"] for r in figures),
+                len(figures),
+            ),
+            "status": rate("status"),
+            "partial_abstained": rate("partial_abstained"),
+            "unsupported_rejected": rate("unsupported_rejected"),
+            "budget": rate("budget"),
+        }
     latencies = [r.usage.latency_seconds for r in results] or [0.0]
     costs = [r.usage.estimated_cost_usd for r in results]
     return LiveEvalReport(
         model=model_name,
         attempted=len(results),
-        metrics={
-            "valid_tool_sequence": (sum(r.valid_tool_sequence for r in results), len(results)),
-            "draft_success": (len(drafted), len(results)),
-            "grounding_pass": (sum(bool(r.grounding_pass) for r in drafted), len(drafted)),
-            "financial_correct": (
-                sum(r.checks["numeric"] and r.checks["company_period"] for r in figures),
-                len(figures),
-            ),  # fmt: skip
-            "status": rate("status"),
-            "partial_abstained": rate("partial_abstained"),
-            "unsupported_rejected": rate("unsupported_rejected"),
-            "budget": rate("budget"),
-        },
+        metrics=metrics,
         prompt_tokens=sum(r.usage.prompt_tokens for r in results),
         completion_tokens=sum(r.usage.completion_tokens for r in results),
         estimated_cost_usd=None if None in costs or not costs else sum(costs, Decimal(0)),
@@ -267,7 +299,8 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
         cases = None
         if args.command == "eval":
             ids = args.cases.split(",") if args.cases else None
-            cases = live_cases(load_dataset(args.dataset).cases, ids, args.all)
+            loaded = load_dataset_v2 if is_v2(args.dataset) else load_dataset
+            cases = live_cases(loaded(args.dataset).cases, ids, args.all)
     except Exception as exc:  # noqa: BLE001 - report the problem and stop
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
@@ -315,6 +348,7 @@ def format_case(result: LiveCaseResult) -> str:
         f"    tools ({_count(len(d.tools), 'call')}, {_count(d.model_turns, 'turn')}): {tools}",
         f"    reached: {reached}",
         f"    ended: {d.terminal_reason}",
+        *[f"    draft rejected: {', '.join(codes)}" for codes in d.draft_rejections],
         f"    grounding issues: {', '.join(d.issue_codes) or 'none'}",
         f"    {usage.requests} requests, {usage.prompt_tokens} prompt + "
         f"{usage.completion_tokens} completion tokens, {cost}, {usage.latency_seconds:.1f} s",

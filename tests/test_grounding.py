@@ -76,7 +76,11 @@ APPLE_REVENUE = compare(APPLE, "revenue", fy(2026), fy(2025))
 JPM_NET_INCOME = compare(JPM, "net_income", q3(2026), q3(2025))
 
 
-def run(script, cache_dir=CACHE, question="question"):
+APPLE_Q = "How much did Apple's revenue grow in fiscal 2026 compared with fiscal 2025?"
+JPM_Q = "How did JPMorgan's net income for the third quarter of 2026 compare with Q3 2025?"
+
+
+def run(script, cache_dir=CACHE, question=APPLE_Q):
     return run_agent(question, scripted_model(script), data=DATA, cache_dir=cache_dir)
 
 
@@ -142,7 +146,7 @@ def test_jpmorgan_q3_net_income_is_complete_with_a_filing_attributed_quote():
         {"answer": {"subject": "$cmp:0", "answer": STD, "values": "$values:0",
                     "citations": ["$cite:0:0"],
                     "quotes": [{"citation_id": "$cite:0:0", "text": "$quote:0:0"}]}},
-    ])  # fmt: skip
+    ], question=JPM_Q)  # fmt: skip
     answer = ground(outcome, data=DATA, cache_dir=CACHE)
     assert answer.status == "complete"
     assert (answer.current.formatted, answer.prior.formatted) == (
@@ -189,7 +193,7 @@ def test_a_value_id_from_another_run_abstains():
         {"tools": [compare(APPLE, "net_income", fy(2026), fy(2025))]},
         {"answer": {"subject": "$cmp:0", "answer": "{x}",
                     "values": [{"placeholder": "x", "value_id": stale}]}},
-    ])  # fmt: skip
+    ], question="How did Apple's net income change in fiscal 2026?")  # fmt: skip
     answer = ground(outcome, data=DATA, cache_dir=CACHE)
     assert answer.status == "abstained" and codes(answer) == ["value_not_in_run"]
 
@@ -383,7 +387,7 @@ def test_management_attribution_needs_an_md_and_a_passage():
                     "citations": ["$cite:0:0"],
                     "quotes": [{"citation_id": "$cite:0:0", "text": "$quote:0:0",
                                 "attribution": "management"}]}},
-    ])  # fmt: skip
+    ], question=JPM_Q)  # fmt: skip
     answer = ground(outcome, data=DATA, cache_dir=CACHE)  # JPM's 10-Q has no reliable MD&A label
     assert codes(answer) == ["attribution_unsupported"] and answer.quotations == []
     assert answer.status == "partial" and answer.citations  # the passage stays a candidate
@@ -407,11 +411,69 @@ def test_causal_explanations_are_withheld_not_published():
 
 
 @pinned
-def test_missing_commentary_gives_a_useful_partial_answer():
+def test_a_figures_only_question_is_complete_without_commentary():
+    # Comparing two periods asks for figures; an empty commentary search changes nothing.
     answer = ground(apple_run({}, query="zzqxv"), data=DATA, cache_dir=CACHE)
-    assert answer.status == "partial" and answer.issues == []
+    assert answer.status == "complete" and answer.issues == [] and answer.citations == []
     assert answer.statement.startswith("Apple Inc. total net sales was $478,834,000,000")
-    assert "no verified candidate commentary from the commentary filing" in answer.warnings
+    assert not any("commentary" in w for w in answer.warnings)
+
+
+COMMENTARY_Q = "Why did Apple's revenue grow in fiscal 2026?"
+
+
+def apple_commentary_run(answer_changes: dict, search_step=True, query=None):
+    draft = {"subject": "$cmp:0", "answer": STD, "values": "$values:0"} | answer_changes
+    steps = [{"tools": [APPLE_REVENUE]}]
+    if search_step:
+        steps.append({"tools": [search(query=query)]})
+    return run([*steps, {"answer": draft}], question=COMMENTARY_Q)
+
+
+@pinned
+def test_commentary_is_required_only_when_asked_for():
+    complete = ground(apple_commentary_run({"citations": ["$cite:0:0"]}), data=DATA,
+                      cache_dir=CACHE)  # fmt: skip
+    assert complete.status == "complete" and complete.request_scope.commentary_required
+
+    skipped = ground(apple_commentary_run({}, search_step=False), data=DATA, cache_dir=CACHE)
+    assert skipped.status == "partial" and skipped.issues == []
+    assert "no commentary search was made for this comparison" in " ".join(skipped.warnings)
+    assert skipped.current.formatted == "$478,834,000,000"  # the figures still stand
+
+    empty = ground(apple_commentary_run({}, query="zzqxv"), data=DATA, cache_dir=CACHE)
+    assert empty.status == "partial"
+    assert "no verified passage was found" in " ".join(empty.warnings)
+
+
+@pinned
+def test_a_requested_quotation_must_be_verified_for_complete():
+    question = "Quote what Apple said about its fiscal 2026 revenue growth."
+    script = [{"tools": [APPLE_REVENUE]}, {"tools": [search()]}]
+    cited = {"subject": "$cmp:0", "answer": STD, "values": "$values:0",
+             "citations": ["$cite:0:0"]}  # fmt: skip
+    without = ground(run([*script, {"answer": cited}], question=question), data=DATA,
+                     cache_dir=CACHE)  # fmt: skip
+    assert without.status == "partial" and without.request_scope.quotation_requested
+    assert "asks for a quotation, but none was verified" in " ".join(without.warnings)
+    quoted = cited | {"quotes": [{"citation_id": "$cite:0:0", "text": "$quote:0:0",
+                                  "attribution": "management"}]}  # fmt: skip
+    with_quote = ground(run([*script, {"answer": quoted}], question=question), data=DATA,
+                        cache_dir=CACHE)  # fmt: skip
+    assert with_quote.status == "complete" and len(with_quote.quotations) == 1
+
+
+@pinned
+def test_presented_commentary_is_still_checked_on_a_figures_only_question():
+    draft = {"subject": "$cmp:0", "answer": STD, "values": "$values:0",
+             "citations": ["$cite:0:0", "sec-psg:invented"]}  # fmt: skip
+    # The agent asks once for a correction; the model repeats the draft, which then stands.
+    outcome = run([{"tools": [APPLE_REVENUE]}, {"tools": [search()]}, {"answer": draft},
+                   {"answer": draft}])  # fmt: skip
+    assert outcome.draft_rejections == [["citation_not_returned"]]
+    answer = ground(outcome, data=DATA, cache_dir=CACHE)
+    assert answer.status == "partial" and [i.code for i in answer.issues] == ["citation_not_in_run"]
+    assert len(answer.citations) == 1  # the grounded one is shown, the invented one is not
 
 
 # --- Runs that never produced a valid draft ---------------------------------------------------

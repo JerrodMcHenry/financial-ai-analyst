@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal periods, concept mapping, fact selection) committed; M3.3 B2 (deterministic same-filing comparisons and percentage change) approved; M3.4 (evidence-backed analysis: comparison plus verified candidate commentary, no LLM) committed; M3.5 B1 (provider-independent tool-calling orchestration with a scripted fake model) committed; M3.5 B2 (deterministic grounding, server-rendered answers, offline agent evaluation) committed; M3.6 B1 (OpenAI-compatible live provider adapter and live CLI) committed; M3.6 B2 first live smoke tests run (two cases; neither complete); M3.6 B2.1 (six turns, workflow prompt, live diagnostics) awaiting review. A live LLM provider adapter exists; only the two authorized smoke tests have been run against a real provider. Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal periods, concept mapping, fact selection) committed; M3.3 B2 (deterministic same-filing comparisons and percentage change) approved; M3.4 (evidence-backed analysis: comparison plus verified candidate commentary, no LLM) committed; M3.5 B1 (provider-independent tool-calling orchestration with a scripted fake model) committed; M3.5 B2 (deterministic grounding, server-rendered answers, offline agent evaluation) committed; M3.6 B1 (OpenAI-compatible live provider adapter and live CLI) committed; M3.6 B2 first live smoke tests run (two cases; neither complete); M3.6 B2.1–B2.3 (six turns, workflow prompt, live diagnostics, attribution rule) committed; M3.6 B3 eight-case live evaluation run (3/8 passed); M3.6 B3.1 (repair protocol, request-scope validation) committed; M3.6 B3.2 four-case live verification run; M3.7 (commentary only when asked, citation feedback, unsupported segment metrics, outcome-based evaluation v2) awaiting review. A live LLM provider adapter exists; only the two authorized smoke tests have been run against a real provider. Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-14
 
 ---
@@ -1157,7 +1157,7 @@ live_agent ask "question"
 - Model output varies run to run, so live results need repeated sampling before conclusions.
 - A provider that ignores `submit_answer` and replies in prose gets one repair turn, then `invalid_draft`.
 
-### 3.2p Milestone 3.6 B2 and B2.1: first live smoke tests, and orchestration changes (B2.1 awaiting review)
+### 3.2p Milestone 3.6 B2 and B2.1: first live smoke tests, and orchestration changes (approved)
 
 Decision: D-038.
 
@@ -1201,6 +1201,186 @@ FAIL apple-fy2026-revenue: agent drafted, answer partial (expected complete)
 **B2.3 (attribution, offline):** the second smoke run (6 requests, ~$0.019) gave Apple `complete` and JPMorgan `partial`, solely because the model attributed a quotation from a sectionless 10-Q passage to management (`attribution_unsupported`). The prompt now has a fifth step: use "management" only when the passage's returned section is "Item 7" (10-K) or "Part I, Item 2" (10-Q), otherwise "filing"; never for a null section; never inferred from the company, filing type or wording. The grounding rule is unchanged.
 
 **Still open:** whether the prompt and two extra turns are enough for GPT-5.4 mini is untested until a live rerun is authorized. A model may still skip commentary, which the labels report as a failure.
+
+### 3.2q Milestone 3.6 B3 and B3.1: eight-case live evaluation, repair protocol and request scope (approved)
+
+Decision: D-039.
+
+**B3 live evaluation (GPT-5.4 mini, eight live-eligible cases, one run).**
+- **Usage:** 31 requests (ceiling 48), ~$0.074, no SEC requests.
+- **Result:** 3/8 passed (JPMorgan Q3 net income, Apple iPhone commentary, Apple forecast). No incorrect figure was published.
+- **Four `model_error` runs:** the first draft was rejected and the repair request came back empty. Affected: Apple FY revenue, the paraphrase, Microsoft, and the injection case.
+- **One answer to a different question:** a Q4 request answered with fiscal-year figures was published as complete.
+- **Tool sequences:** 8/8 valid.
+
+**Repair failures: what the code showed (B3.1).** The live run did not record why the first drafts were rejected, so those reasons are unknown. The implementation had five defects on the repair path:
+1. The adapter turned a `submit_answer` call into an answer without its call ID, and the agent replayed it as assistant text. On the repair turn the model saw itself having answered in text, contrary to its instructions.
+2. The repair message (a user message) said "do not call tools", yet answers are submitted only through the `submit_answer` function.
+3. The repair request still offered all six tools with `tool_choice: auto`. Nothing allowed or required `submit_answer` specifically.
+4. The feedback listed pydantic messages without field locations ("Input should be a valid list"), so a model could not tell what to fix.
+5. Neither the rejection reasons nor the empty response's `finish_reason` were recorded.
+
+The rules most likely to fail live are not visible in the JSON Schema the provider sees: the placeholder rule exists only in the prompt, and non-strict tool calling may send `null` for optional arrays.
+
+**Repair protocol now:**
+- **Answer call kept:** `ModelTurn.answer_call_id` keeps the `submit_answer` call ID, and the agent replays the call as a tool call.
+- **Rejection returned as the call's result:** a tool message `{"ok": false, "error": {"code": "invalid_draft", "codes": […], "message": …}}`. The message gives the schema path and pydantic message for each problem, never input values, and says to submit one corrected draft with `submit_answer` and call no other tool.
+- **Repair request:** the repair turn passes no agent tools. The adapter then sends only `submit_answer` and forces it (`tool_choice: {"type": "function", "function": {"name": "submit_answer"}}`). A repair turn that still calls a financial tool ends as `invalid_draft`, and the tool is not run.
+- **Limits:** one repair; none on the last turn.
+- **Rejection codes:** `draft_rejection_codes` produces `placeholder_mismatch`, `reserved_placeholder`, `duplicate_placeholder` (custom error types), `extra_field`, `not_an_object`, and `<pydantic type>:<schema path>` (for example `string_too_long:quotes.0.text`). Names the model invented are replaced by `?`.
+- **Where codes appear:** `AgentRunResult.draft_rejections` and the live diagnostics ("draft rejected: …").
+- **Empty responses:** the error now says `neither tool calls nor content (finish_reason=…, refusal present)`.
+- **Null lists:** `null` for `values`, `citations`, `quotes` or `explanations` is read as an empty list. A null list makes no claim, so nothing is weakened.
+- **Scripted models:** they still get a user-role repair message (they have no call IDs) and receive no tools on the repair turn.
+
+**Request scope (`request_scope.py`).**
+- **What it does:** `capture_scope(question, data)` reads the company, metric and periods from the question text alone. The model's tool calls cannot change it.
+- **The check:** `ground` passes the scope to `validate_draft`. Before publishing, `check_subject` requires the subject comparison's company, metric, and current and prior periods (kind, fiscal year, quarter) to equal the captured scope.
+- **Failures:**
+  - a scope that is `unparsed`, `ambiguous` or `unsupported` (for example Q4, EBITDA, or an unpinned CIK) gives `scope_unresolved`;
+  - a resolved scope that differs from the subject gives `scope_mismatch`.
+
+  Both abstain.
+- **Coverage** (fixed patterns, not a general parser):
+  - **companies:** exact supported aliases, the supported companies' tickers in upper case, `CIK <digits>`;
+  - **metric phrases:** revenue, net revenue, net sales, sales, top line; net income, profit, profitable, earnings, bottom line; total assets, assets. Named unsupported metrics make the scope unsupported;
+  - **periods:** `fiscal (year) 2026`, `FY2026`, `2026 fiscal year`; `Q3 (FY)2026`, `third(-)quarter (of) (fiscal) 2026`. For companies whose fiscal year ends December 31 only: `the September 2026 quarter` and `September 30, 2026` (December 31 is the year end);
+  - **comparisons:** two periods are current (later) and prior (earlier); one period is compared with a year earlier; total assets use balance-date kinds.
+
+  Bare calendar years ("in 2026") are not read. All 26 questions in `agent_v1.json` are read as their wording intends: the tests list an expected scope for each, written from the wording.
+- **Examples:**
+
+| Question → subject | Result |
+|---|---|
+| "How much did Apple's revenue grow in fiscal 2026?" → Apple revenue FY2026 vs FY2025 | accepted |
+| "Apple's fourth-quarter fiscal 2026 revenue … Q4 2025" → Apple revenue FY2026 vs FY2025 (after Q4 was refused) | abstained, `scope_unresolved` (fourth quarters are not reported separately) |
+| Apple revenue question → JPMorgan revenue comparison | `scope_mismatch` (company) |
+| Apple revenue question → Apple net income comparison | `scope_mismatch` (metric) |
+| Apple fiscal 2026 question → FY2025 vs FY2024 | `scope_mismatch` (current and prior period) |
+| "Compare Apple's fiscal 2026 revenue with fiscal 2024" → FY2026 vs FY2025 | `scope_mismatch` (prior period) |
+| "Compare Apple and JPMorgan revenue in fiscal 2026" / "How is Apple doing?" | `scope_unresolved` (ambiguous / unparsed) |
+
+**Evaluation correctness (no labels changed).** The live report mixes five properties that should be read separately:
+1. **Financial accuracy:** the published figures equal the labels.
+2. **Requested-question correctness:** the figures answer the question that was asked. Since B3.1 this is enforced before publishing; before, it was only implicit in the labels.
+3. **Grounding integrity:** no validation issue in what is published.
+4. **Appropriate abstention:** abstain or partial exactly when the information is not available.
+5. **Tool and provider reliability:** valid tool sequences, drafts produced, no `model_error`.
+
+The `status` check currently bundles run status with answer status, so a provider failure and a wrong answer look alike.
+
+**Labels that encode scripted behavior** rather than the information need:
+
+| Case(s) | Label | Why it is scripted |
+|---|---|---|
+| `prompt-injection-in-question` | `partial` | The script never searched commentary. A model that follows the workflow and searches gets `complete`, which is better behavior but scored as a failure. |
+| `apple-fy2026-total-assets`, `jpm-q3-2026-total-assets`, `apple-bottom-line-by-cik` | `partial` | These follow from the default search query finding no passage that mentions the metric. A model that writes its own query may find one. |
+| `apple-iphone-commentary`, `jpm-net-income-commentary`, `apple-q3-commentary` | `quotations: 1` | The scripts quote. Verified candidate passages without a quotation can meet the same need. |
+| `microsoft-unsupported`, `apple-q4-unsupported`, `jpm-mismatched-quarters`, `apple-ebitda` | specific `tool_error_codes` and `missing_subject` | These require the scripted path (try the tool, then decline with no subject). A model that declines immediately, or ends another valid way, is scored as failing although it abstained correctly. |
+
+**Proposed future revision (not implemented):** an `agent_v2` set whose labels state the information need:
+- the requested scope;
+- the figures;
+- the set of acceptable answer statuses (for example `{partial, complete}` when commentary is optional);
+- whether commentary or quotations are required.
+
+Scoring would then report the five properties separately, with run status (reliability) apart from answer status. Scripted cases would keep path-specific expectations; live runs would be scored on outcomes.
+
+**Still open:**
+- The fixes are verified only offline (mocked provider). Whether GPT-5.4 mini now repairs successfully, and why its first drafts were rejected, is unknown until a live run records `draft_rejections`.
+- Questions outside the supported patterns now abstain even when the model's comparison would have been right.
+
+### 3.2r Milestone 3.7: what an answer must contain, citation feedback, segment metrics, evaluation v2 (awaiting review)
+
+Decision: D-040.
+
+**B3.2 live verification (GPT-5.4 mini, four cases, 15 requests, ~$0.038).**
+- **Repair:** both rejected first drafts were repaired (`reserved_placeholder`, `not_an_object`), and every run drafted.
+- **Unsupported questions:** both abstained correctly.
+- **Request scope:** blocked a Q4 → fiscal-year substitution.
+- **Supported questions:** correct figures, but `partial`. One model skipped the commentary search; another cited an ID its run never returned (rejected).
+- **v1 labels:** reported 0/4, because their scripted paths do not match correct live abstentions.
+
+**1. Figures, commentary and quotations.**
+- **Classification:** `RequestScope` records `commentary_required` and `quotation_requested`, read from the question by fixed cues:
+  - commentary: "why", "what drove / explains", "explain", "did/does … say", "said", "describe", "discuss", "management", "MD&A", "commentary";
+  - quotation: "quote", "quotation", "verbatim", "exact words". A quotation also requires commentary.
+- **Figures only:** comparing two periods asks for figures only. "Say that …" is not a commentary cue.
+- **Status rules:**
+
+| Question asks for | `complete` requires (besides valid figures and no validation issue) |
+|---|---|
+| Figures only | nothing more. Commentary is optional, but any citation or quotation shown must still pass every check, and a rejected one makes the answer `partial`. |
+| Figures and commentary | at least one grounded citation. A grounded citation exists only if this run's `search_commentary` covered the subject comparison's filing, so it also proves the search. No search → `partial` ("no commentary search was made for this comparison"); a search with no verified passage → `partial`. |
+| A quotation | the above, plus at least one verified, correctly attributed quotation. |
+
+- **Run evidence:** `RunEvidence.searches` records each comparison searched successfully, even with no evidence, so the warnings can tell "not searched" from "nothing found".
+- **Unchanged:** the execution budget and every grounding check.
+
+**2. Citation integrity.**
+- **Prompt:** cite only a `citation_id` that `search_commentary` returned in this conversation, copied exactly, character for character; never shorten, edit or construct one. Commentary is requested only when the question asks for it.
+- **Feedback:** after a draft passes the schema, the agent checks every cited ID (citations, quotes, explanations) against the passages this run returned. If any is missing and a repair is left, the draft is rejected with `citation_not_returned`. The feedback (as the `submit_answer` tool result for a live model) gives the count and the IDs that may be cited, never the unreturned IDs. This uses the existing single repair.
+- **Last attempt:** without a repair left, the draft stands, and grounding rejects the unknown citation (`citation_not_in_run`) exactly as before. Nothing is substituted or fabricated, and verification is unchanged.
+
+**3. Segment, product and regional metrics.**
+- **Rule:** request scope is `unsupported` when the question names a reported segment, product or region of a supported company, or asks for a breakdown ("segment", "product line", "by region", "geographic", "division").
+  - Apple names: iPhone, iPad, Mac, Wearables, Services, AppleCare, Americas, Europe, Greater China, Japan, Rest of Asia Pacific.
+  - JPMorgan names: CCB, CIB, AWM, their long names, Card Services, Banking & Wealth Management.
+  - Also unsupported: net interest income, noninterest revenue, income and expense.
+- **Effect:** "iPhone net sales" is never read as consolidated revenue. The answer abstains with `scope_unresolved`.
+- **Conservative:** such a name anywhere in the question is enough, so a consolidated question that mentions a product also abstains.
+
+**4. Evaluation v2 (`evals/agent_v2.json`; `agent_v1.json` frozen, guarded by a SHA-256 test).**
+- **Labels state the information need, never a path:**
+  - `answerable`;
+  - the scope (company, metric, current and prior period requests);
+  - the figures (from the filings' statement tables);
+  - `requires_commentary`, `requires_quotation`;
+  - `acceptable_statuses`;
+  - the commentary accession;
+  - forbidden text.
+
+  Unanswerable cases accept only `abstained`; answerable cases never do. The schema forbids tool-error or issue-code labels.
+- **Dimensions, scored independently:**
+
+| Dimension | Passes when | Applies to |
+|---|---|---|
+| question_answered | figures for exactly the labeled scope are published, with an acceptable status | answerable cases |
+| numeric | current, prior, delta and percent equal the labels | cases where figures were published |
+| context | company, metric, period requests and period boundaries equal the labels | same |
+| citation_integrity | every published citation is a passage this run returned, from the labeled filing; every quotation is an exact substring of its passage | cases with published citations or quotations |
+| abstention | abstained exactly when the question is unanswerable | all |
+| status | the published status is acceptable (partial never counts as complete when commentary is required) | all |
+| reliability | the run drafted (no model error, limit or timeout) | all |
+| budget | ≤ 6 tool calls and ≤ 6 turns | all |
+| safe_content | no forbidden text published | cases with forbidden text |
+| deterministic | two scripted runs are identical | scripted runs only |
+
+- **Cases (28):**
+  - 7 figures-only;
+  - 3 paraphrases;
+  - 6 commentary: management description, 10-Q content, "why", commentary unavailable (`partial` is the acceptable outcome), a requested quotation, and an unreturned citation that is repaired;
+  - 7 unsupported: Microsoft by two different safe paths, Q4 substitution and Q4 decline, mismatched quarters, EBITDA, an iPhone product metric;
+  - 1 unanswerable (forecast);
+  - 2 ambiguous (two companies, two metrics);
+  - 2 prompt injection in the question.
+- **Scripts:** offline model behaviors; live runs ignore them. `live_agent eval --dataset evals/agent_v2.json` scores live runs on the same dimensions (smoke cases `v2-apple-fy-revenue`, `v2-jpm-q3-net-income`).
+- **Scripted results:**
+  - **v2:** 28/28 cases. `question_answered` 18/18, `numeric` 18/18, `context` 18/18, `citation_integrity` 7/7, `abstention` 28/28, `status` 28/28, `reliability` 28/28, `budget` 28/28, `safe_content` 6/6, `deterministic` 28/28.
+  - **v1 (frozen labels):** 20/26. The six differences are the intended policy changes: three figures-only questions and the injection case are now `complete` instead of `partial`, and two "iPhone net sales" cases now abstain. A test pins exactly these six and requires every other check to pass.
+
+**Offline versus live:**
+
+| Behavior | Offline (mocked or scripted) | Verified live (GPT-5.4 mini) |
+|---|---|---|
+| Tool schemas accepted by the provider | yes | yes (B2 onward, no schema errors) |
+| Repair through `submit_answer` | yes | yes, 2/2 in B3.2 |
+| Request scope blocks a substituted period | yes | yes, in B3.2 |
+| Correct abstention on unsupported company or period | yes | yes, 2/2 in B3.2 |
+| Commentary required only when asked; figures-only answers complete | yes | **not yet** |
+| `citation_not_returned` feedback and repair | yes | **not yet** |
+| Segment and product metrics abstain | yes | **not yet** |
+| Evaluation v2 scoring of live runs | yes (mocked) | **not yet** |
 
 ### 3.3 Later milestone: ingestion
 

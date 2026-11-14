@@ -120,8 +120,11 @@ def apple_script() -> ScriptedModel:
     ])  # fmt: skip
 
 
-def run(model, data=None, **kwargs):
-    return run_agent("question", model, data=data or DATA, cache_dir=CACHE, **kwargs)
+APPLE_REVENUE_Q = "How much did Apple's revenue grow in fiscal 2026 compared with fiscal 2025?"
+
+
+def run(model, data=None, question=APPLE_REVENUE_Q, **kwargs):
+    return run_agent(question, model, data=data or DATA, cache_dir=CACHE, **kwargs)
 
 
 PLAIN = ModelTurn(answer={"answer": "No figures."})
@@ -572,6 +575,12 @@ def quoting_answer(compare_id: str, search_id: str, attribution: str | None = No
     return step
 
 
+SCOPED_QUESTIONS = {
+    APPLE: APPLE_REVENUE_Q,
+    JPM: "How did JPMorgan's net income for the third quarter of 2026 compare with Q3 2025?",
+}
+
+
 def quoting_run(cik, metric, current, prior, attribution=None):
     model = ScriptedModel([
         tools(call("c", "compare", cik=cik, metric=metric, current_period=current,
@@ -580,7 +589,7 @@ def quoting_run(cik, metric, current, prior, attribution=None):
                                 comparison_id=output(m, "c")["comparison_id"])),
         quoting_answer("c", "s", attribution),
     ])  # fmt: skip
-    return run(model)
+    return run(model, question=SCOPED_QUESTIONS[cik])
 
 
 @pinned
@@ -624,3 +633,65 @@ def test_management_attribution_of_a_sectionless_passage_is_still_rejected():
         "attribution_unsupported"
     ]
     assert answer.quotations == [] and answer.citations  # the passage remains a candidate
+
+
+# --- Citations the run never returned (M3.7) ---------------------------------------------------
+
+
+def citing_answer(citation: str | None):
+    """Answer citing `citation`, or the first returned passage when None."""
+
+    def step(messages, specs):
+        comparison = output(messages, "c")
+        cited = citation or output(messages, "s")["evidence"][0]["citation_id"]
+        return ModelTurn(answer={
+            "subject": comparison["comparison_id"], "answer": "{company} {metric}: {delta}.",
+            "values": [{"placeholder": "delta", "value_id": comparison["delta"]["value_id"]}],
+            "citations": [cited],
+        })  # fmt: skip
+
+    return step
+
+
+def search_then(*answers):
+    return ScriptedModel([
+        tools(compare_call("c", APPLE)),
+        lambda m, t: tools(call("s", "search_commentary",
+                                comparison_id=output(m, "c")["comparison_id"])),
+        *answers,
+    ])  # fmt: skip
+
+
+FORGED = "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:forged"
+
+
+@pinned
+def test_an_unreturned_citation_gets_one_repair_listing_the_returned_ids():
+    model = search_then(citing_answer(FORGED), citing_answer(None))
+    outcome = run(model, question="Why did Apple's revenue grow in fiscal 2026?")
+    assert outcome.status == "drafted" and outcome.repair_attempted
+    assert outcome.draft_rejections == [["citation_not_returned"]]
+    feedback = model.received[3][-1].content
+    returned = outcome.tool_results[1].output["evidence"]
+    assert all(e["citation_id"] in feedback for e in returned)  # the ids that may be cited
+    assert FORGED not in feedback  # the unreturned id is not echoed back
+    assert ground(outcome, data=DATA, cache_dir=CACHE).status == "complete"
+
+
+@pinned
+def test_an_unreturned_citation_after_the_repair_is_rejected_by_grounding():
+    model = search_then(citing_answer(FORGED), citing_answer(FORGED))
+    outcome = run(model, question="Why did Apple's revenue grow in fiscal 2026?")
+    assert outcome.status == "drafted"  # no second repair: the draft stands
+    answer = ground(outcome, data=DATA, cache_dir=CACHE)
+    assert answer.status == "partial" and [i.code for i in answer.issues] == ["citation_not_in_run"]
+    assert answer.citations == [] and FORGED not in answer.model_dump_json(exclude={"issues"})
+
+
+@pinned
+def test_the_prompt_asks_for_exact_citation_ids_and_commentary_only_when_asked():
+    model = ScriptedModel([PLAIN])
+    run(model)
+    prompt = model.received[0][0].content
+    assert "copied exactly, character for character" in prompt
+    assert "A question that only asks for\n   the figures needs no search" in prompt

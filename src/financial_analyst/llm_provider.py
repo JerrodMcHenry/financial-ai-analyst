@@ -8,7 +8,9 @@ this module only carries messages and never decides anything.
 - Tools are sent as functions. The final answer is a call to one extra function,
   submit_answer, whose parameters are the AnswerDraft schema; a reply in plain content is
   also accepted as an answer (and fails draft validation unless it is that JSON object).
-- Tool-call ids from the provider are kept, so each tool result answers its own call.
+- Tool-call ids from the provider are kept, so each tool result answers its own call. That
+  includes the submit_answer call: a rejected draft is answered with a tool result giving
+  the rejection codes, and the repair request offers and forces submit_answer only.
 - One HTTP request per complete() call. Nothing is retried: a provider error, malformed
   response or timeout raises ProviderError, which run_agent turns into a model_error.
 - A request never outlives the run: its timeout is the smaller of the configured request
@@ -38,6 +40,7 @@ from pydantic import (
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from financial_analyst.agent import (
+    ANSWER_TOOL,
     RUN_TIMEOUT_SECONDS,
     AnswerDraft,
     Message,
@@ -46,7 +49,6 @@ from financial_analyst.agent import (
     ToolSpec,
 )
 
-ANSWER_TOOL = "submit_answer"
 ANSWER_TOOL_DESCRIPTION = (
     "Submit the final answer draft. Call this alone, after the other tools, instead of "
     "replying in text. Numbers only as {placeholder}s mapped to value_ids."
@@ -207,10 +209,14 @@ def parse_response(body: Any) -> ModelTurn:
         raise ProviderError("malformed_response", f"{ANSWER_TOOL} must be alone in its turn")
     content = message.get("content")
     if not calls and (not isinstance(content, str) or not content.strip()):
-        raise ProviderError("malformed_response", "neither tool calls nor content")
+        finish = choice.get("finish_reason")
+        finish = finish if isinstance(finish, str) and finish.isidentifier() else "unknown"
+        refusal = ", refusal present" if message.get("refusal") else ""
+        detail = f"neither tool calls nor content (finish_reason={finish}{refusal})"
+        raise ProviderError("malformed_response", detail)
     try:
         if answers:
-            return ModelTurn(answer=answers[0].arguments)
+            return ModelTurn(answer=answers[0].arguments, answer_call_id=answers[0].id)
         if calls:
             return ModelTurn(tool_calls=calls)
         return ModelTurn(answer=_parse_arguments(content))
@@ -279,8 +285,10 @@ class OpenAICompatibleModel:
             "model": self._settings.model,
             "messages": to_provider_messages(messages),
             "tools": to_provider_tools(tools),
-            "tool_choice": "auto",
-        }
+            # No agent tools offered (a repair turn): the answer tool is the only allowed call.
+            "tool_choice": "auto" if tools else {"type": "function",
+                                                  "function": {"name": ANSWER_TOOL}},
+        }  # fmt: skip
         if self._settings.temperature is not None:
             payload["temperature"] = self._settings.temperature
         timeout = min(self._settings.request_timeout_seconds, remaining)
