@@ -36,7 +36,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
-from pydantic import ValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from financial_analyst.sec_client import (
     SecClient,
@@ -272,6 +272,96 @@ def _parsed[T](snapshot: Snapshot, parse: Callable[[dict, SnapshotMetadata], T])
         return parse(decode_json(snapshot.content, str(metadata.source.source_url)), metadata)
     except SecResponseError as exc:
         raise SnapshotError("invalid", f"{metadata.kind} snapshot: {exc}") from exc
+
+
+# --- Pin manifests -----------------------------------------------------------------------
+
+
+class SnapshotPin(BaseModel):
+    """One exact snapshot a manifest depends on. Everything here must match the stored
+    metadata on load, not only the SHA-256."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: SnapshotKind
+    cik: str | None = Field(pattern=r"^\d{10}$")
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_url: str
+    retrieved_at: AwareDatetime
+    http_status: int
+    size_bytes: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _check_url(self) -> "SnapshotPin":
+        if self.source_url != snapshot_url(self.kind, self.cik):  # also checks kind/CIK rules
+            raise ValueError(f"{self.source_url} is not the canonical URL for this snapshot")
+        return self
+
+
+class SnapshotManifest(BaseModel):
+    """A versioned list of pinned snapshots, committed to the repository (the raw JSON is
+    not). Loading it and then every pin reproduces exactly the same data offline."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    manifest_version: str = Field(min_length=1)
+    snapshot_schema_version: int
+    description: str
+    snapshots: list[SnapshotPin] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check_unique(self) -> "SnapshotManifest":
+        if self.snapshot_schema_version != SNAPSHOT_SCHEMA_VERSION:
+            raise ValueError(f"unsupported snapshot schema version {self.snapshot_schema_version}")
+        keys = [(pin.kind, pin.cik) for pin in self.snapshots]
+        if len(set(keys)) != len(keys):
+            raise ValueError("a manifest pins at most one snapshot per kind and company")
+        return self
+
+    def pin(self, kind: SnapshotKind, cik: str | int | None = None) -> SnapshotPin:
+        """The pin for one kind (and company). Raises KeyError if the manifest has none."""
+        key = (kind, None if cik is None else normalize_cik(cik))
+        for pin in self.snapshots:
+            if (pin.kind, pin.cik) == key:
+                return pin
+        raise KeyError(
+            f"the manifest pins no {kind} snapshot" + (f" for CIK {key[1]}" if cik else "")
+        )
+
+
+def load_snapshot_manifest(path: Path) -> SnapshotManifest:
+    """Read and validate a manifest. Raises OSError or pydantic.ValidationError."""
+    return SnapshotManifest.model_validate_json(path.read_bytes())
+
+
+def load_pinned_snapshot(cache_dir: Path, pin: SnapshotPin) -> Snapshot:
+    """The exact snapshot a pin names: verified as by load_snapshot, and its stored
+    metadata must equal the pin's URL, retrieval time, status and size. Raises SnapshotError."""
+    snapshot = load_snapshot(cache_dir, pin.kind, pin.sha256, pin.cik)
+    source = snapshot.metadata.source
+    stored = (
+        str(source.source_url),
+        source.retrieved_at,
+        source.http_status,
+        len(snapshot.content),
+    )
+    if stored != (pin.source_url, pin.retrieved_at, pin.http_status, pin.size_bytes):
+        raise SnapshotError("mismatched", f"{pin.kind} snapshot {pin.sha256} differs from its pin")
+    return snapshot
+
+
+def pin_for(snapshot: Snapshot) -> SnapshotPin:
+    """The manifest pin describing a stored snapshot."""
+    metadata = snapshot.metadata
+    return SnapshotPin(
+        kind=metadata.kind,
+        cik=metadata.cik,
+        sha256=metadata.source.content_sha256,
+        source_url=str(metadata.source.source_url),
+        retrieved_at=metadata.source.retrieved_at,
+        http_status=metadata.source.http_status,
+        size_bytes=len(snapshot.content),
+    )
 
 
 def _snapshot_paths(

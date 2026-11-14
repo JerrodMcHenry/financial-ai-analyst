@@ -1,0 +1,52 @@
+{
+  "manifest_version": "1",
+  "snapshot_schema_version": 1,
+  "description": "Apple and JPMorgan Chase submissions and Company Facts, and SEC's company_tickers.json, acquired once for M3 (M3.2 B2).",
+  "snapshots": [
+    {
+      "kind": "company_tickers",
+      "cik": null,
+      "sha256": "391effc6a807ae1752c9d2c351dbecab8f15aa1c59b035a9a28f7955a94feb0f",
+      "source_url": "https://www.sec.gov/files/company_tickers.json",
+      "retrieved_at": "2026-11-14T02:40:24.743826Z",
+      "http_status": 200,
+      "size_bytes": 796325
+    },
+    {
+      "kind": "submissions",
+      "cik": "0000320193",
+      "sha256": "d7c4a3c888fe60da97ceef8f9b80da4c205e82440c1bc3ba9dcc7316a482a6b1",
+      "source_url": "https://data.sec.gov/submissions/CIK0000320193.json",
+      "retrieved_at": "2026-11-14T02:40:25.385399Z",
+      "http_status": 200,
+      "size_bytes": 163926
+    },
+    {
+      "kind": "company_facts",
+      "cik": "0000320193",
+      "sha256": "f085735b4d08fb116ade18d24247ffabe11df8eb52eae6556b165831f15ef1ad",
+      "source_url": "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json",
+      "retrieved_at": "2026-11-14T02:40:25.893775Z",
+      "http_status": 200,
+      "size_bytes": 3859564
+    },
+    {
+      "kind": "submissions",
+      "cik": "0000019617",
+      "sha256": "230e6a8f376248e49d2aa769f816e9cca65fd93f7151b70419881e2a1acdc666",
+      "source_url": "https://data.sec.gov/submissions/CIK0000019617.json",
+      "retrieved_at": "2026-11-14T02:40:26.395470Z",
+      "http_status": 200,
+      "size_bytes": 4663270
+    },
+    {
+      "kind": "company_facts",
+      "cik": "0000019617",
+      "sha256": "5c6e52a9e2a27ec66dafa43b7b31d23f09d6fbca9487937ce98d1d499220e3a0",
+      "source_url": "https://data.sec.gov/api/xbrl/companyfacts/CIK0000019617.json",
+      "retrieved_at": "2026-11-14T02:40:26.910877Z",
+      "http_status": 200,
+      "size_bytes": 8142039
+    }
+  ]
+}

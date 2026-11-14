@@ -480,6 +480,10 @@ Nothing here rejects semantic or hybrid retrieval in general.
   - one malformed ticker-map row rejects the whole snapshot;
   - hard-link creation is acceptable on the supported filesystems;
   - snapshot SHA-256 pins are recorded in M3.2 B2.
+- **Acquisition (M3.2 B2, 2026-11-14):**
+  - Five requests, all HTTP 200, through a transport that enforces an exact allowlist, one attempt per URL and a total of five, with `max_retries=0`.
+  - Pinned in `evals/sec_snapshots_v1.json`, manifest version 1. Raw snapshots are not committed.
+  - `SecClient` gained an optional `max_retries` argument; the default behavior is unchanged.
 
 **Why:**
 - Submissions and Company Facts change over time, so reproducible financial answers and evaluations need one exact, verifiable version.

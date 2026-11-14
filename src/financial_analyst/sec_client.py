@@ -93,8 +93,17 @@ def normalize_cik(cik: str | int) -> str:
 class SecClient:
     """Synchronous EDGAR client. Create one per process so pacing is shared."""
 
-    def __init__(self, settings: Settings, transport: httpx.BaseTransport | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.BaseTransport | None = None,
+        max_retries: int = MAX_RETRIES,
+    ) -> None:
         # `transport` is httpx's hook for swapping the network layer; tests pass a MockTransport.
+        # `max_retries=0` makes every request a single attempt (budgeted one-time acquisition).
+        if isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0:
+            raise ValueError(f"max_retries must be a non-negative integer, got {max_retries!r}")
+        self._max_retries = max_retries
         self._min_interval = 1.0 / settings.sec_max_requests_per_second
         self._next_request_at = 0.0
         self._lock = threading.Lock()
@@ -161,7 +170,7 @@ class SecClient:
 
     def _get(self, url: str) -> httpx.Response:
         """GET with pacing and bounded retries; raises SecError on failure."""
-        max_attempts = MAX_RETRIES + 1
+        max_attempts = self._max_retries + 1
         for attempt in range(1, max_attempts + 1):
             self._pace()
             retry_after = None
@@ -188,7 +197,11 @@ class SecClient:
                 break
             delay = _backoff_delay(attempt, retry_after)
             logger.warning(
-                "SEC request failed (%s); retry %d/%d in %.1fs", error, attempt, MAX_RETRIES, delay
+                "SEC request failed (%s); retry %d/%d in %.1fs",
+                error,
+                attempt,
+                self._max_retries,
+                delay,
             )
             time.sleep(delay)
         raise error

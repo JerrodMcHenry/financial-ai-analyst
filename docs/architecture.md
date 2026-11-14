@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots and company identity) implemented, awaiting review; no structured data acquired yet. Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (one-time acquisition of five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) awaiting review. Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-13
 
 ---
@@ -672,9 +672,21 @@ search(query, filters):  semantic: cosine over the filtered rows → ties as BM2
   - Wrong period: the 10-Q ranked above the 10-K for fiscal-year questions, or the reverse for June-quarter questions (ASU 2023-09 adoption, manufacturing obligations, services margin, control changes).
   - Filtered searches scoped to the right filing hit 7/7 for every retriever. Scoping by company and period, as in M3, addresses this whichever retriever is used.
 
-### 3.2i Milestone 3.2 B1: immutable structured-data snapshots and company identity (awaiting review)
+### 3.2i Milestone 3.2: immutable structured-data snapshots, company identity and the pinned acquisition
 
-Decisions: D-030 (snapshots and identity), D-031 (approved rules for M3.3). No SEC data has been acquired for M3 yet. The five-request acquisition is M3.2 B2, which needs separate approval.
+Decisions: D-030 (snapshots and identity), D-031 (approved rules for M3.3).
+
+**Acquisition (M3.2 B2, 2026-11-14):** `python -m financial_analyst.snapshot_acquisition` (`snapshot_acquisition.py`) made **5 requests, all HTTP 200**:
+- the ticker map;
+- submissions and Company Facts for Apple (CIK 0000320193) and JPMorgan Chase (CIK 0000019617).
+
+**Budget enforcement:** the transport layer refuses, before sending, any URL outside the approved five, a second attempt at any URL, or a request beyond the budget. `SecClient` runs with `max_retries=0`, pacing is capped at 4 requests per second, and redirects aren't followed. Any failure stops acquisition.
+
+**Verification and pinning:**
+- After each save, the snapshot is reloaded and checked: hash, metadata, canonical URL, typed parsing and expected CIK.
+- The committed, versioned manifest `evals/sec_snapshots_v1.json` pins each one by kind, CIK, full SHA-256, URL, retrieval time, status and size.
+- `load_pinned_snapshot` requires the stored metadata to equal the pin exactly.
+- The raw JSON stays in the git-ignored cache, so **the local cache is required** to use the pins, as with filing documents.
 
 ```
 acquire (network, M3.2 B2):  SecClient.get_snapshot(kind, cik) → exact response bytes + SourceMetadata,
@@ -712,6 +724,14 @@ identity (financial_tools):  resolve_company(identifier, TickerMap) → CompanyI
   - All ticker and alias matches are collected. More than one CIK gives `company_ambiguous`, with the candidates.
   - Tickers and aliases use the ticker map only. No match, or an alias whose CIK isn't in the ticker map, gives `company_not_found`.
   - Empty, overlong or invalid input gives `invalid_identifier`.
+- **Findings from the pinned data, for M3.3 (not acted on yet):**
+  - **JPMorgan's total net revenue** in its 2026 10-Qs is tagged `us-gaap:RevenuesNetOfInterestExpense` (Q3 2026: 50,172,000,000, matching the 10-Q table). `us-gaap:Revenues` was last filed in the FY2025 10-K (2026-02-13), and in 10-Qs only until 2014. The M3.1 candidate mapping (`Revenues`) is therefore wrong for quarters and must be decided by the M3.3 statement cross-check.
+  - **Apple** reports `RevenueFromContractWithCustomerExcludingAssessedTax`, `NetIncomeLoss` and `Assets` through its FY2026 10-K. `Revenues` was last used in 2018.
+  - **Submissions coverage:**
+    - JPMorgan's `recent_filings` holds 26,513 filings but only one 10-K and three 10-Qs, because it files many prospectuses. Older periodic reports are in pages that weren't fetched (`has_more_filings`, risk R12).
+    - Apple's holds 12 10-Ks and 33 10-Qs.
+    - All three cached filings are listed, with report dates 2026-09-26, 2026-06-27 and 2026-09-30.
+  - **Ticker map:** 10,405 entries for 8,002 CIKs, with no ticker mapping to more than one CIK. JPMorgan's CIK lists 9 tickers, including exchange-traded notes.
 - **Approved rules recorded now, implemented in M3.3 (D-031):**
   1. **Historical fiscal periods** are grounded in actual filing report dates and observation boundaries. The company's `fiscal_year_end` is a consistency check, never the sole authority. SEC's `fy`/`fp` tags never define a period.
   2. **`same_filing` comparisons** select each observation by exact accession, concept, unit and period boundaries. Values from different filings are never mixed silently.

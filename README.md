@@ -8,8 +8,10 @@ BM25 keyword search (the default retriever), an offline retrieval-evaluation har
 development set, a held-out set and recorded results. Semantic and hybrid retrieval exist as an
 optional experiment that was evaluated and not adopted. M3 (deterministic financial tools and a
 grounded tool-calling agent) is in progress: immutable, hash-verified snapshots for submissions,
-Company Facts and the ticker map, plus exact company identity resolution (M3.2 B1). No structured
-data snapshots have been acquired yet. See [docs/architecture.md](docs/architecture.md) and
+Company Facts and the ticker map, plus exact company identity resolution (M3.2 B1), and five
+snapshots (Apple, JPMorgan Chase, SEC's ticker map) acquired once and pinned in
+`evals/sec_snapshots_v1.json` (M3.2 B2). The raw snapshots stay in the git-ignored cache, so the
+local cache is needed to use them. See [docs/architecture.md](docs/architecture.md) and
 [docs/decisions.md](docs/decisions.md).
 
 ## Requirements
