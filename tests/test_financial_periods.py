@@ -10,7 +10,7 @@ import hashlib
 import re
 import socket
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from pathlib import Path
 
 import pytest
@@ -529,3 +529,283 @@ def test_pinned_fact_provenance_names_the_snapshot():
     )
     assert (again.fact_key, again.observation_id) == (fact.fact_key, fact.observation_id)
     assert period.period_end - period.period_start == timedelta(days=91)
+
+
+# --- Comparisons and percentage change (M3.3 B2) ------------------------------------------
+
+from financial_analyst.financial_tools import (  # noqa: E402
+    calculate_change,
+    compare_periods,
+    percent_change,
+    sign_change,
+)
+
+d = Decimal
+
+
+@pytest.mark.parametrize(
+    ("current", "prior", "status", "display"),
+    [
+        ("115", "100", "computed", "15.0%"),
+        ("85", "100", "computed", "-15.0%"),
+        ("449", "400", "computed", "12.2%"),  # exactly 12.25: half-even rounds down to even
+        ("449.4", "400", "computed", "12.4%"),  # exactly 12.35: half-even rounds up to even
+        ("351", "400", "computed", "-12.2%"),  # exactly -12.25
+        ("-50", "100", "computed", "-150.0%"),  # positive base turning negative: still computed
+        ("10", "0", "undefined_zero_base", None),
+        ("-10", "0", "undefined_zero_base", None),
+        ("10", "-20", "not_meaningful_negative_base", None),
+        ("-30", "-20", "not_meaningful_negative_base", None),
+    ],
+)
+def test_percentage_policy(current, prior, status, display):
+    result = percent_change(d(current), d(prior))
+    assert (result.status, result.display) == (status, display)
+    assert result.exact is None or isinstance(result.exact, Decimal)
+
+
+def test_exact_percentage_keeps_unrounded_digits():
+    result = percent_change(d(4), d(3))  # 33.333...% does not terminate
+    assert result.exact == d("33.33333333333333333333333333333333")
+    assert result.display == "33.3%"
+    assert percent_change(d("416161000000"), d("416161000000")).exact == 0
+
+
+@pytest.mark.parametrize(
+    ("current", "prior", "expected"),
+    [
+        ("-5", "10", "positive_to_negative"),
+        ("5", "-10", "negative_to_positive"),
+        ("5", "10", "none"),
+        ("-5", "-10", "none"),
+        ("0", "10", "none"),  # reaching zero is not a sign change
+        ("10", "0", "none"),
+    ],
+)
+def test_sign_changes_are_flagged_in_both_directions(current, prior, expected):
+    assert sign_change(d(current), d(prior)) == expected
+
+
+def synthetic_facts():
+    submissions, facts = company()
+    fy25 = resolve_period(fy(2025), submissions, facts)
+    fy24 = resolve_period(fy(2024), submissions, facts)
+    return (
+        get_fact(facts, "revenue", fy25, "same_filing", K25),
+        get_fact(facts, "revenue", fy24, "same_filing", K25),
+    )
+
+
+def test_calculate_change_is_exact_decimal_arithmetic():
+    current, prior = synthetic_facts()
+    change = calculate_change(current, prior)
+    assert (change.current, change.prior, change.delta) == (d(416), d(390), d(26))
+    assert change.percent.display == "6.7%" and change.sign_change == "none"
+
+
+@pytest.mark.parametrize(
+    ("alter", "problem"),
+    [
+        (lambda c, p: (c.model_copy(update={"unit": "EUR"}), p), "unit_mismatch"),
+        (
+            lambda c, p: (
+                c,
+                p.model_copy(
+                    update={"period": p.period.model_copy(update={"period_class": "3_months"})}
+                ),
+            ),
+            "period_class_mismatch",
+        ),
+        (lambda c, p: (p, c), "invalid_request"),  # prior after current
+        (lambda c, p: (c.model_copy(update={"concept": "NetIncomeLoss"}), p), "invalid_request"),
+    ],
+)
+def test_incompatible_facts_are_never_compared(alter, problem):
+    current, prior = alter(*synthetic_facts())
+    with pytest.raises(FinancialDataError) as error:
+        calculate_change(current, prior)
+    assert error.value.problem == problem
+
+
+def test_same_filing_comparison_reports_revisions_separately():
+    submissions, facts = company()
+    comparison = compare_periods(submissions, facts, "revenue", fy(2025), fy(2024))
+    assert comparison.commentary_filing.accession_number == K25
+    assert (comparison.change.current, comparison.change.prior) == (d(416), d(390))
+    # FY2024 as originally filed (391, in K24) is reported next to it, never swapped in.
+    assert [(r.side, r.value, r.accession_number, r.relation) for r in comparison.revisions] == [
+        ("prior", d(391), K24, "earlier")
+    ]
+    assert comparison.prior.observation.accession_number == K25
+
+
+def test_a_missing_comparative_observation_is_refused():
+    submissions, facts = company()
+    with pytest.raises(FinancialDataError) as error:  # K25 reports no FY2024 assets
+        compare_periods(submissions, facts, "total_assets", year_end(2025), year_end(2024))
+    assert error.value.problem == "observation_not_in_filing"
+    with pytest.raises(FinancialDataError) as error:  # K24 does not report FY2025
+        compare_periods(submissions, facts, "revenue", fy(2025), fy(2024), accession_number=K24)
+    assert error.value.problem == "observation_not_in_filing"
+
+
+def test_a_prior_year_without_its_original_filing_comes_from_the_filing_itself():
+    submissions, facts = company()
+    without_k24 = submissions.model_copy(
+        update={
+            "recent_filings": [f for f in submissions.recent_filings if f.accession_number != K24]
+        }
+    )
+    comparison = compare_periods(without_k24, facts, "revenue", fy(2025), fy(2024))
+    prior = comparison.prior.period
+    assert prior.basis == "comparative_in_filing" and prior.original_filing is None
+    assert prior.commentary_filing.accession_number == K25
+    assert (prior.period_start, prior.period_end) == (D(2023, 10, 1), D(2024, 9, 28))
+    assert any("not in the submissions snapshot" in c for c in prior.checks)
+    assert any(
+        K24 in c and "none is treated as a verified original filing" in c for c in prior.checks
+    )
+    with pytest.raises(FinancialDataError) as error:  # not year-over-year: never inferred
+        compare_periods(without_k24, facts, "revenue", fy(2025), fy(2023))
+    assert error.value.problem == "period_not_found"
+
+
+def test_an_ambiguous_comparative_period_is_refused():
+    submissions, facts = company()
+    without_k24 = submissions.model_copy(
+        update={
+            "recent_filings": [f for f in submissions.recent_filings if f.accession_number != K24]
+        }
+    )
+    rival = obs(REV, 1, D(2023, 9, 24), D(2024, 9, 21), K25, "10-K", D(2025, 10, 31))
+    facts = facts.model_copy(update={"observations": [*facts.observations, rival]})
+    with pytest.raises(FinancialDataError) as error:
+        compare_periods(without_k24, facts, "revenue", fy(2025), fy(2024))
+    assert error.value.problem == "period_ambiguous"
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "problem"),
+    [
+        ({"policy": "latest_filed"}, "policy_not_supported"),
+        ({"policy": "original"}, "policy_not_supported"),
+        ({"accession_number": "0000000001-99-000001"}, "invalid_request"),  # not listed
+    ],
+)
+def test_unsupported_comparison_requests_are_refused(kwargs, problem):
+    with pytest.raises(FinancialDataError) as error:
+        compare_periods(*company(), "revenue", fy(2025), fy(2024), **kwargs)
+    assert error.value.problem == problem
+
+
+def test_comparisons_across_period_kinds_are_refused():
+    with pytest.raises(FinancialDataError) as error:
+        compare_periods(*company(), "revenue", fy(2025), quarter(2025, 3))
+    assert error.value.problem == "period_class_mismatch"
+
+
+def test_comparisons_are_deterministic():
+    submissions, facts = company()
+    a = compare_periods(submissions, facts, "revenue", fy(2025), fy(2024))
+    b = compare_periods(submissions, facts, "revenue", fy(2025), fy(2024))
+    assert a.model_dump() == b.model_dump() and a.comparison_id == b.comparison_id
+    assert a.comparison_id.startswith("cmp:")
+
+
+@pinned
+@pytest.mark.parametrize(
+    ("cik", "metric", "current", "prior", "values", "delta", "display", "filing"),
+    [
+        (APPLE, "revenue", fy(2026), fy(2025), (478_834, 416_161), 62_673, "15.1%",
+         "0000320193-26-000026"),
+        (APPLE, "revenue", quarter(2026, 3), quarter(2025, 3), (109_417, 94_036), 15_381, "16.4%",
+         "0000320193-26-000020"),
+        (JPM, "revenue", quarter(2026, 3), quarter(2025, 3), (50_172, 46_427), 3_745, "8.1%",
+         "0001628280-26-069523"),
+        (JPM, "net_income", quarter(2026, 3), quarter(2025, 3), (15_305, 14_393), 912, "6.3%",
+         "0001628280-26-069523"),
+        (APPLE, "total_assets", year_end(2026), year_end(2025), (404_548, 359_241), 45_307, "12.6%",
+         "0000320193-26-000026"),
+        (JPM, "total_assets", quarter_end(2026, 3), quarter_end(2025, 3), (5_091_545, 4_560_205),
+         531_340, "11.7%", "0001628280-26-069523"),
+    ],
+)  # fmt: skip
+def test_pinned_comparisons(cik, metric, current, prior, values, delta, display, filing):
+    submissions, facts = PINNED[1][cik]
+    comparison = compare_periods(submissions, facts, metric, current, prior)
+    million = 1_000_000
+    assert (comparison.change.current, comparison.change.prior) == tuple(
+        v * million for v in values
+    )
+    assert comparison.change.delta == delta * million
+    assert comparison.change.percent.display == display
+    with localcontext() as context:  # the unrounded percentage, to 34 significant digits
+        context.prec = 34
+        assert comparison.change.percent.exact == (d(values[0]) - d(values[1])) / d(values[1]) * 100
+    assert comparison.commentary_filing.accession_number == filing
+    for fact in (comparison.current, comparison.prior):
+        assert fact.observation.accession_number == filing  # one filing, never mixed
+        assert fact.snapshot.content_sha256 == PINNED[0].pin("company_facts", cik).sha256
+        assert fact.fact_key.startswith("fact:") and fact.observation_id.startswith("obs:")
+    assert comparison.revisions == []
+
+
+@pinned
+def test_jpmorgan_q3_2025_comes_from_the_q3_2026_10q_without_a_verified_original():
+    submissions, facts = PINNED[1][JPM]
+    comparison = compare_periods(submissions, facts, "revenue", quarter(2026, 3), quarter(2025, 3))
+    prior = comparison.prior.period
+    assert (prior.period_start, prior.period_end) == (D(2025, 7, 1), D(2025, 9, 30))
+    assert prior.basis == "comparative_in_filing"
+    assert prior.original_filing is None  # unavailable: never fabricated
+    assert prior.commentary_filing.accession_number == "0001628280-26-069523"
+    assert comparison.prior.observation.accession_number == "0001628280-26-069523"
+    assert any("inside FY2025 (2025-01-01 to 2025-12-31)" in c for c in prior.checks)
+    # Company Facts knows the original 10-Q's accession, but it is only reported as unverified.
+    assert any(
+        "0001628280-25-048859" in c and "none is treated as a verified" in c for c in prior.checks
+    )
+
+
+@pinned
+@pytest.mark.parametrize(
+    ("prior", "problem"),
+    [
+        (quarter(2025, 2), "period_not_found"),  # not year-over-year: no comparative fallback
+        (quarter(2024, 3), "period_not_found"),  # two years back
+    ],
+)
+def test_pinned_comparisons_never_infer_other_periods(prior, problem):
+    submissions, facts = PINNED[1][JPM]
+    with pytest.raises(FinancialDataError) as error:
+        compare_periods(submissions, facts, "revenue", quarter(2026, 3), prior)
+    assert error.value.problem == problem
+
+
+@pinned
+def test_pinned_comparison_requires_both_values_in_the_named_filing():
+    submissions, facts = PINNED[1][APPLE]
+    with pytest.raises(FinancialDataError) as error:  # the 10-K has no Q3 3-month figures
+        compare_periods(submissions, facts, "revenue", quarter(2026, 3), quarter(2025, 3),
+                        accession_number="0000320193-26-000026")  # fmt: skip
+    assert error.value.problem == "observation_not_in_filing"
+
+
+@pinned
+def test_pinned_restatements_are_reported_but_never_replace_same_filing_values():
+    submissions, facts = PINNED[1][APPLE]
+    # FY2016 10-K: FY2015 assets as recast there (290,345M); the FY2015 10-K had 290,479M.
+    later = compare_periods(submissions, facts, "total_assets", year_end(2016), year_end(2015))
+    assert later.change.prior == d("290345000000")
+    assert [(r.side, r.value, r.relation) for r in later.revisions] == [
+        ("prior", d("290479000000"), "earlier")
+    ]
+    # FY2015 10-K: its own 290,479M, with the FY2016 10-K's later revision reported separately.
+    # FY2014's 10-K is not listed, so FY2014 year-end comes from the FY2015 10-K's comparative.
+    earlier = compare_periods(submissions, facts, "total_assets", year_end(2015), year_end(2014))
+    assert earlier.change.current == d("290479000000")
+    assert [(r.side, r.value, r.accession_number, r.relation) for r in earlier.revisions] == [
+        ("current", d("290345000000"), "0001628280-16-020309", "later")
+    ]
+    assert earlier.prior.period.basis == "comparative_in_filing"
+    assert earlier.prior.period.original_filing is None

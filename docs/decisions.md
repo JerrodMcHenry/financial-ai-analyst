@@ -540,3 +540,29 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - Concept fallback lists: rejected, because they hide that two concepts may measure different things.
 - `us-gaap:Revenues` for JPMorgan: rejected, because it isn't in 10-Qs.
 - Deriving Q4 or missing quarters from year-to-date values: rejected for M3.
+
+## D-033 Same-filing comparisons and the percentage-change policy
+**Status:** Proposed (M3.3 B2, 2026-11-14)
+**Decision:** `compare_periods` compares one metric between two exact periods, with both values read from a single filing (architecture §3.2k).
+- **The filing:** the current period's original reporting filing, the commentary filing by default, or a named listed 10-K or 10-Q.
+- **Both observations** must use the mapped concept and unit, match their exact period boundaries, and come from that filing. Otherwise the comparison is refused: `observation_not_in_filing`, `period_class_mismatch`, `unit_mismatch`.
+- **Only `same_filing` is implemented.** Separately sourced comparisons are refused, never used as a fallback.
+- **A prior period whose original filing isn't in the submissions snapshot** may, for year-over-year comparisons only, take its boundaries from the filing's own single prior-year comparative period, checked against the known fiscal calendar.
+  - `ResolvedPeriod.basis` is then `comparative_in_filing`, and `original_filing` is `None`. Unlisted accessions found in Company Facts are named as unverified, never adopted.
+- **Percentage:**
+  - Exact `((current - prior) / prior) × 100` as Decimal (34 significant digits).
+  - Shown half-even to one decimal place only for a positive prior value.
+  - Undefined for a zero base, and not meaningful for a negative base.
+  - Sign changes are flagged both ways. The delta is exact.
+- **Revisions:** other filings' different values for either period are listed separately (earlier, later or same date) and never replace the compared values.
+- **Identity:** each comparison carries both facts' keys and observation ids, the snapshot fingerprint, and a deterministic `comparison_id`.
+
+**Why:**
+- Values from one filing are the ones its MD&A explains, so numbers and commentary can't disagree because of a later restatement.
+- A comparative inside a later filing is real reported data. Treating it as such, while saying the original filing is unverified, avoids both inventing an accession and refusing a period the filing plainly reports.
+- Percentages of non-positive bases mislead, so the policy shows only the delta.
+
+**Alternatives:**
+- Mixing the latest value for each side: rejected, because it can pair numbers no filing discussed.
+- Using the original filing accession Company Facts reveals for an unlisted period: rejected, because it isn't verified against submissions.
+- Percentages with absolute-value bases: rejected for this policy.

@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal period resolution, exact concept mapping, fact selection) awaiting review. No comparisons or agent yet. Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal periods, concept mapping, fact selection) committed; M3.3 B2 (deterministic same-filing comparisons and percentage change) awaiting review. No LLM or agent yet. Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-13
 
 ---
@@ -801,6 +801,64 @@ PeriodRequest(kind, fiscal_year, quarter)            fiscal_year | fiscal_quarte
 - **Restatements found in the pinned data:**
   - Apple: FY2015 total assets were 290,479M in the FY2015 10-K and 290,345M in the FY2016 10-K. The FY2009 net income restatement through a 10-K/A predates the listed 10-Ks.
   - JPMorgan: 2020 revenue and assets were revised in 2021 filings.
+
+### 3.2k Milestone 3.3 B2: deterministic comparisons and percentage change (awaiting review)
+
+Decision: D-033. Code: `compare_periods`, `calculate_change`, `percent_change` and `sign_change` in `financial_tools.py`.
+
+```
+compare_periods(submissions, facts, metric, current, prior, policy="same_filing", accession=None)
+  current period  ← resolve_period(current)              (original filing must be listed)
+  filing          ← current period's original filing, or a named listed 10-K/10-Q (the commentary filing)
+  prior period    ← resolve_period(prior)
+                    or, only if that says period_not_found AND the request is year-over-year,
+                    the filing's own single prior-year comparative period (basis comparative_in_filing)
+  both facts      ← get_fact(..., "same_filing", filing)  (same concept, unit, exact boundaries, one filing)
+  change          ← calculate_change: delta = current - prior (exact Decimal); percent policy; sign change
+  revisions       ← other values other filings reported for either period, reported separately
+  → Comparison(current, prior, change, revisions, commentary_filing, comparison_id)
+```
+
+**Three filing roles, kept apart in every comparison:**
+
+| Role | Meaning | Where it is recorded |
+|---|---|---|
+| Original reporting filing | The 10-K or 10-Q whose report date is the period end: the filing that first reported the period as its current period. Verified only when listed in the submissions snapshot. | `ResolvedPeriod.original_filing`; `None` with basis `comparative_in_filing` when it isn't listed (never guessed) |
+| Observation source filing | The filing whose observation supplied the value | `Fact.observation.accession_number` (for comparisons, always the commentary filing) |
+| Commentary filing | The filing whose MD&A explains the comparison; both values come from it | `Comparison.commentary_filing` and `ResolvedPeriod.commentary_filing` |
+
+**Comparative periods missing from submissions** (for example JPMorgan Q3 2025):
+- **When it's allowed:** only for a year-over-year request (same kind and quarter, one fiscal year earlier), and only when `resolve_period` reports `period_not_found`.
+- **What must hold:**
+  - The commentary filing reports exactly one period of the same class ending 357–371 days before the current period, and, for durations, starting 357–371 days before it.
+  - It must fit the known fiscal calendar: inside the prior fiscal year when that year's 10-K is listed, with a quarter at the same offset from the fiscal-year start (±7 days); otherwise, for year-end periods, within ±7 days of `fiscal_year_end`.
+  - A quarter whose prior fiscal year isn't established by a listed 10-K is refused.
+- **What is recorded:** the original filing as unavailable (`None`). If Company Facts contains observations of that period from accessions the submissions snapshot doesn't list, the checks name them and state that none is treated as a verified original filing.
+
+**Percentage policy (D-033):**
+- Formula: `((current - prior) / prior) × 100`, computed as Decimal to 34 significant digits (`exact`).
+- Presentation: rounded half-even to one decimal place (`display`), only when the prior value is positive.
+- A zero base gives `undefined_zero_base`, and a negative base gives `not_meaningful_negative_base`. Neither is displayed.
+- Sign changes are flagged in both directions. Reaching zero isn't a sign change.
+- No floats are used anywhere.
+
+**Verified comparisons (pinned data):**
+
+| Comparison | Current | Prior | Delta | % | Filing (both values) |
+|---|---|---|---|---|---|
+| Apple revenue FY2026 vs FY2025 | 478,834M | 416,161M | 62,673M | 15.1% | 10-K `0000320193-26-000026` |
+| Apple revenue Q3 FY2026 vs Q3 FY2025 | 109,417M | 94,036M | 15,381M | 16.4% | 10-Q `0000320193-26-000020` |
+| JPMorgan revenue Q3 2026 vs Q3 2025 | 50,172M | 46,427M | 3,745M | 8.1% | 10-Q `0001628280-26-069523` (prior: comparative in filing) |
+| JPMorgan net income Q3 2026 vs Q3 2025 | 15,305M | 14,393M | 912M | 6.3% | the same 10-Q (comparative) |
+| Apple total assets, end of FY2026 vs end of FY2025 | 404,548M | 359,241M | 45,307M | 12.6% | 10-K `…-26-000026` |
+| JPMorgan total assets, end of Q3 2026 vs end of Q3 2025 | 5,091,545M | 4,560,205M | 531,340M | 11.7% | 10-Q `…-26-069523` (comparative) |
+
+**Restatements:**
+- **Apple total assets at the end of FY2015, read in the FY2016 10-K:** the comparison uses that filing's 290,345M. The FY2015 10-K's 290,479M is reported as an `earlier` revision.
+- **Read in the FY2015 10-K:** the comparison uses 290,479M. The FY2016 10-K's 290,345M is a `later` revision.
+- Neither value ever replaces the same-filing value.
+
+**Not implemented:** separately sourced comparisons (`latest_filed`, `original`) are refused with `policy_not_supported`. There is no automatic fallback to another filing.
 
 ### 3.3 Later milestone: ingestion
 

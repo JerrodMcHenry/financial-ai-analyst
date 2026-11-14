@@ -14,7 +14,9 @@ snapshots (Apple, JPMorgan Chase, SEC's ticker map) acquired once and pinned in
 local cache is needed to use them. M3.3 B1 adds fiscal period resolution grounded in filing
 report dates, exact per-company XBRL concepts for revenue, net income and total assets (Apple,
 JPMorgan Chase), and fact selection by explicit policy (`latest_filed`, `original`,
-`same_filing`). Comparisons and the agent come next. See [docs/architecture.md](docs/architecture.md) and
+`same_filing`). M3.3 B2 adds deterministic comparisons: both values from one filing, an exact
+Decimal delta, and a percentage shown only for a positive base, with restatements reported
+separately. The LLM agent comes next. See [docs/architecture.md](docs/architecture.md) and
 [docs/decisions.md](docs/decisions.md).
 
 ## Requirements

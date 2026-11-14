@@ -12,7 +12,7 @@ that could mean more than one company is rejected rather than guessed (D-030).
 import hashlib
 import re
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
@@ -243,6 +243,9 @@ FinancialProblem = Literal[
     "observation_not_found",
     "observation_ambiguous",
     "observation_not_in_filing",
+    "period_class_mismatch",
+    "unit_mismatch",
+    "policy_not_supported",
     "invalid_request",
 ]
 FYE_TOLERANCE_DAYS = 7  # 52/53-week fiscal years end within a week of the nominal date
@@ -273,14 +276,21 @@ class PeriodRequest(BaseModel):
         return self
 
 
+PeriodBasis = Literal["original_filing", "comparative_in_filing"]
+
+
 class ResolvedPeriod(BaseModel):
-    """An exact economic period and the filing it belongs to.
+    """An exact economic period and the filings it is tied to.
 
     - period_start / period_end: the requested economic period (period_start is None for
-      an instant), from the original reporting filing's own observations.
-    - original_filing: the 10-K or 10-Q whose report date is period_end, i.e. the filing
-      that first reported this period as its current period.
-    - commentary_filing: the filing whose MD&A discusses this period: the original filing.
+      an instant).
+    - basis "original_filing": the boundaries come from the original reporting filing (the
+      10-K or 10-Q whose report date is period_end, listed in the submissions snapshot).
+    - basis "comparative_in_filing": the original filing is not in the snapshot; the
+      boundaries come from a later filing's own prior-year comparative observations, for a
+      year-over-year comparison only. original_filing is then None: it was not verified.
+    - commentary_filing: the filing whose MD&A discusses this period: the original filing,
+      or for a comparative, the later filing that reports it.
     The observation source filing belongs to each selected fact (Fact.observation).
     """
 
@@ -292,8 +302,9 @@ class ResolvedPeriod(BaseModel):
     period_end: date
     period_class: PeriodClass  # "12_months", "3_months" or "instant"
     label: str  # e.g. "FY2026 (2025-09-28 to 2026-09-26)"
-    fiscal_year_start: date
-    original_filing: FilingRef
+    fiscal_year_start: date | None  # None when no listed filing establishes it
+    basis: PeriodBasis = "original_filing"
+    original_filing: FilingRef | None  # None only for basis "comparative_in_filing"
     commentary_filing: FilingRef
     checks: list[str]  # the consistency checks made, or why one was not possible
     submissions_sha256: str
@@ -451,10 +462,9 @@ def _check_fiscal_year_end(report_date: date, fiscal_year_end: str | None, check
     if gap > FYE_TOLERANCE_DAYS:
         raise FinancialDataError(
             "period_ambiguous",
-            f"the 10-K report date {report_date} is {gap} days from fiscal_year_end "
-            f"{fiscal_year_end}",
+            f"the period end {report_date} is {gap} days from fiscal_year_end {fiscal_year_end}",
         )
-    checks.append(f"report date is {gap} day(s) from fiscal_year_end {fiscal_year_end}")
+    checks.append(f"{report_date} is {gap} day(s) from fiscal_year_end {fiscal_year_end}")
 
 
 def _resolved(request, submissions, facts, start, filing, label, period_class_, fy_start, checks):
@@ -467,6 +477,7 @@ def _resolved(request, submissions, facts, start, filing, label, period_class_, 
         period_class=period_class_,
         label=f"{label} ({start} to {end})" if start else f"{label} ({end})",
         fiscal_year_start=fy_start,
+        basis="original_filing",
         original_filing=filing,
         commentary_filing=filing,
         checks=list(checks),
@@ -626,6 +637,345 @@ def get_fact(
         selection_reason=reason,
         snapshot=facts.source,
     )
+
+
+# --- Comparisons and percentage change (M3.3 B2, D-033) -----------------------------------
+
+COMPARISON_VERSION = "1"
+_EXACT = 34  # significant digits for the unrounded percentage (Decimal division)
+PercentStatus = Literal["computed", "undefined_zero_base", "not_meaningful_negative_base"]
+SignChange = Literal["none", "positive_to_negative", "negative_to_positive"]
+ComparisonPolicy = Literal["same_filing", "latest_filed", "original"]
+_YEAR_DAYS = (357, 371)  # one fiscal year back, allowing for 52/53-week years
+
+
+class PercentChange(BaseModel):
+    """((current - prior) / prior) * 100 and how it may be presented."""
+
+    model_config = ConfigDict(frozen=True)
+
+    status: PercentStatus
+    exact: Decimal | None  # unrounded, to 34 significant digits; None unless computed
+    display: str | None  # rounded half-even to one decimal, e.g. "15.1%"; None unless computed
+    note: str
+
+
+class Change(BaseModel):
+    """The deterministic arithmetic of one comparison."""
+
+    model_config = ConfigDict(frozen=True)
+
+    current: Decimal
+    prior: Decimal
+    delta: Decimal  # current - prior, exact
+    percent: PercentChange
+    sign_change: SignChange
+
+
+class Revision(BaseModel):
+    """A different value another eligible filing reported for one side's exact period.
+    Reported next to the comparison; it never replaces the same-filing value."""
+
+    model_config = ConfigDict(frozen=True)
+
+    side: Literal["current", "prior"]
+    value: Decimal
+    accession_number: str
+    form: str
+    filed: date
+    relation: Literal["earlier", "later", "same_date"]  # filed relative to the source filing
+
+
+class Comparison(BaseModel):
+    """Two facts for exact periods, read from one filing, and the change between them."""
+
+    model_config = ConfigDict(frozen=True)
+
+    cik: str
+    metric: Metric
+    policy: ComparisonPolicy
+    commentary_filing: FilingRef  # the filing both values come from, whose MD&A discusses them
+    current: Fact
+    prior: Fact
+    change: Change
+    revisions: list[Revision]  # other values reported elsewhere, oldest first
+    version: str = COMPARISON_VERSION
+
+    @computed_field
+    @property
+    def comparison_id(self) -> str:
+        return "cmp:" + _digest(
+            (self.version, self.current.observation_id, self.prior.observation_id)
+        )
+
+
+def percent_change(current: Decimal, prior: Decimal) -> PercentChange:
+    """The percentage policy (D-033). The formula is exact; presentation is separate."""
+    if prior == 0:
+        return PercentChange(
+            status="undefined_zero_base",
+            exact=None,
+            display=None,
+            note="percentage change undefined: the prior value is zero",
+        )
+    if prior < 0:
+        return PercentChange(
+            status="not_meaningful_negative_base",
+            exact=None,
+            display=None,
+            note="percentage change not meaningful under this policy: the prior value is negative",
+        )
+    with localcontext() as context:
+        context.prec = _EXACT
+        exact = (current - prior) / prior * 100
+        display = exact.quantize(Decimal("0.1"), rounding=ROUND_HALF_EVEN)
+    return PercentChange(
+        status="computed", exact=exact, display=f"{display}%", note="(current - prior) / prior"
+    )
+
+
+def sign_change(current: Decimal, prior: Decimal) -> SignChange:
+    if prior > 0 > current:
+        return "positive_to_negative"
+    if prior < 0 < current:
+        return "negative_to_positive"
+    return "none"
+
+
+def calculate_change(current: Fact, prior: Fact) -> Change:
+    """Delta, percentage and sign change between two facts. Refuses incompatible facts:
+    different company, metric, concept or unit, different period classes, or a prior
+    period that does not end before the current one."""
+    if (current.cik, current.metric, current.concept) != (prior.cik, prior.metric, prior.concept):
+        raise FinancialDataError("invalid_request", "the facts are not the same company and metric")
+    if current.unit != prior.unit:
+        raise FinancialDataError("unit_mismatch", f"{current.unit} vs {prior.unit}")
+    if current.period.period_class != prior.period.period_class:
+        raise FinancialDataError(
+            "period_class_mismatch",
+            f"{current.period.period_class} vs {prior.period.period_class}",
+        )
+    if prior.period_end >= current.period_end:
+        raise FinancialDataError("invalid_request", "the prior period must end before the current")
+    return Change(
+        current=current.value,
+        prior=prior.value,
+        delta=current.value - prior.value,  # exact: Decimal subtraction does not round here
+        percent=percent_change(current.value, prior.value),
+        sign_change=sign_change(current.value, prior.value),
+    )
+
+
+def compare_periods(
+    submissions: CompanySubmissions,
+    facts: CompanyFacts,
+    metric: Metric,
+    current: PeriodRequest,
+    prior: PeriodRequest,
+    policy: ComparisonPolicy = "same_filing",
+    accession_number: str | None = None,
+) -> Comparison:
+    """Compare one metric between two exact periods, both read from one filing.
+
+    The filing defaults to the current period's original reporting filing (the commentary
+    filing); `accession_number` may name another listed 10-K or 10-Q instead. Both
+    observations must come from that filing, for the mapped concept and unit and the exact
+    period boundaries; if either is missing the comparison is refused. Separately sourced
+    comparisons (latest_filed, original) are not implemented and are refused.
+
+    If the prior period's own original filing is not in the submissions snapshot, and only
+    for a year-over-year comparison (same kind and quarter, one fiscal year earlier), its
+    boundaries are taken from the filing's own comparative observations (see
+    _comparative_period). Raises FinancialDataError.
+    """
+    if policy != "same_filing":
+        raise FinancialDataError(
+            "policy_not_supported",
+            "only same_filing comparisons are implemented; values are never mixed across filings",
+        )
+    current_period = resolve_period(current, submissions, facts)
+    if accession_number is None:
+        filing = current_period.original_filing
+    else:
+        listed = [f for f in submissions.recent_filings if f.accession_number == accession_number]
+        if len(listed) != 1 or listed[0].form not in ("10-K", "10-Q"):
+            raise FinancialDataError(
+                "invalid_request", f"{accession_number} is not a listed 10-K or 10-Q"
+            )
+        filing = listed[0]
+    try:
+        prior_period = resolve_period(prior, submissions, facts)
+    except FinancialDataError as exc:
+        year_over_year = (prior.kind, prior.quarter, prior.fiscal_year) == (
+            current.kind, current.quarter, current.fiscal_year - 1,
+        )  # fmt: skip
+        if exc.problem != "period_not_found" or not year_over_year:
+            raise
+        prior_period = _comparative_period(prior, current_period, filing, submissions, facts)
+    if prior_period.period_class != current_period.period_class:
+        raise FinancialDataError(
+            "period_class_mismatch",
+            f"{current_period.label} vs {prior_period.label}: different kinds of period",
+        )
+    current_fact = get_fact(facts, metric, current_period, "same_filing", filing.accession_number)
+    prior_fact = get_fact(facts, metric, prior_period, "same_filing", filing.accession_number)
+    change = calculate_change(current_fact, prior_fact)
+    return Comparison(
+        cik=facts.cik,
+        metric=metric,
+        policy=policy,
+        commentary_filing=filing,
+        current=current_fact,
+        prior=prior_fact,
+        change=change,
+        revisions=_revisions(current_fact, "current") + _revisions(prior_fact, "prior"),
+    )
+
+
+def _comparative_period(
+    request: PeriodRequest,
+    current: ResolvedPeriod,
+    filing: FilingRef,
+    submissions: CompanySubmissions,
+    facts: CompanyFacts,
+) -> ResolvedPeriod:
+    """The prior-year period as the filing itself reports it, when its own original filing
+    is not in the submissions snapshot. Accepted only if:
+    - the filing reports exactly one period of the same class ending one fiscal year
+      (357-371 days) before the current period, starting one fiscal year before it too;
+    - it fits the company's known fiscal calendar: inside the prior fiscal year when that
+      year's 10-K is listed (a quarter at the same offset from the fiscal year start),
+      otherwise within FYE_TOLERANCE_DAYS of fiscal_year_end for year-end periods.
+    The original reporting filing is recorded as unavailable, never guessed."""
+    low, high = (current.period_end - timedelta(days=d) for d in reversed(_YEAR_DAYS))
+    boundaries = {
+        (obs.period_start, obs.period_end)
+        for obs in facts.observations
+        if obs.accession_number == filing.accession_number
+        and period_class(obs) == current.period_class
+        and low <= obs.period_end <= high
+    }
+    if len(boundaries) != 1:
+        raise FinancialDataError(
+            "period_not_found" if not boundaries else "period_ambiguous",
+            f"{filing.accession_number} reports {len(boundaries)} {current.period_class} "
+            f"period(s) one fiscal year before {current.label}",
+        )
+    start, end = boundaries.pop()
+    checks = [
+        f"FY{request.fiscal_year}'s original filing is not in the submissions snapshot; the "
+        f"period is the prior-year comparative reported in {filing.form} {filing.accession_number}",
+        f"ends {(current.period_end - end).days} days before the current period",
+    ]
+    if start is not None:
+        offset = (current.period_start - start).days
+        if not _YEAR_DAYS[0] <= offset <= _YEAR_DAYS[1]:
+            raise FinancialDataError(
+                "period_ambiguous", f"the comparative starts {offset} days before the current"
+            )
+        checks.append(f"starts {offset} days before the current period")
+    fy_start = _check_comparative_calendar(request, current, start, end, submissions, facts, checks)
+    others = sorted(
+        {obs.accession_number for obs in facts.observations
+         if obs.period_end == end and obs.period_start == start
+         and obs.accession_number != filing.accession_number
+         and not any(f.accession_number == obs.accession_number
+                     for f in submissions.recent_filings)}
+    )  # fmt: skip
+    if others:
+        checks.append(
+            f"Company Facts also has observations of this period from {', '.join(others)}, "
+            "which the submissions snapshot does not list; none is treated as a verified "
+            "original filing"
+        )
+    name = (
+        f"Q{request.quarter} FY{request.fiscal_year}"
+        if request.quarter
+        else f"FY{request.fiscal_year}"
+    )
+    if request.kind.endswith("_end"):
+        name = f"end of {name}"
+    dates = f"{start} to {end}" if start else f"{end}"
+    return ResolvedPeriod(
+        cik=facts.cik,
+        request=request,
+        period_start=start,
+        period_end=end,
+        period_class=current.period_class,
+        label=f"{name} ({dates}, comparative in {filing.accession_number})",
+        fiscal_year_start=fy_start,
+        basis="comparative_in_filing",
+        original_filing=None,
+        commentary_filing=filing,
+        checks=checks,
+        submissions_sha256=submissions.source.content_sha256,
+        facts_sha256=facts.source.content_sha256,
+    )
+
+
+def _check_comparative_calendar(request, current, start, end, submissions, facts, checks):
+    """Check a comparative period against the known fiscal calendar; return the fiscal
+    year start when a listed filing establishes it."""
+    prior_year = request.fiscal_year
+    try:
+        fiscal_year = resolve_period(
+            PeriodRequest(kind="fiscal_year", fiscal_year=prior_year), submissions, facts
+        )
+    except FinancialDataError as exc:
+        if exc.problem != "period_not_found":
+            raise
+        fiscal_year = None
+    if fiscal_year is not None:
+        fy_start, fy_end = fiscal_year.period_start, fiscal_year.period_end
+        if not (fy_start <= (start or end) and end <= fy_end):
+            raise FinancialDataError(
+                "period_ambiguous",
+                f"the comparative period is not inside FY{prior_year} ({fy_start} to {fy_end})",
+            )
+        if request.kind.startswith("fiscal_year") and end != fy_end:
+            raise FinancialDataError(
+                "period_ambiguous", f"the comparative year does not end with FY{prior_year}"
+            )
+        if request.kind == "fiscal_year" and start != fy_start:
+            raise FinancialDataError(
+                "period_ambiguous", f"the comparative year does not start with FY{prior_year}"
+            )
+        if request.kind.startswith("fiscal_quarter") and current.fiscal_year_start is not None:
+            current_anchor = current.period_start or current.period_end
+            prior_anchor = start or end
+            gap = abs((current_anchor - current.fiscal_year_start).days
+                      - (prior_anchor - fy_start).days)  # fmt: skip
+            if gap > FYE_TOLERANCE_DAYS:
+                raise FinancialDataError(
+                    "period_ambiguous",
+                    f"the comparative quarter sits {gap} days away from Q{request.quarter}'s "
+                    "position in its fiscal year",
+                )
+        checks.append(f"inside FY{prior_year} ({fy_start} to {fy_end}) from its listed 10-K")
+        return fy_start
+    if request.kind.startswith("fiscal_quarter"):
+        raise FinancialDataError(
+            "period_not_found",
+            f"FY{prior_year}'s boundaries are not established by a listed 10-K, so a "
+            "comparative quarter cannot be placed in its fiscal year",
+        )
+    _check_fiscal_year_end(end, submissions.fiscal_year_end, checks)
+    return start
+
+
+def _revisions(fact: Fact, side: Literal["current", "prior"]) -> list[Revision]:
+    source = fact.observation
+
+    def relation(filed: date):
+        return (
+            "earlier" if filed < source.filed else "later" if filed > source.filed else "same_date"
+        )
+
+    return [
+        Revision(side=side, value=o.value, accession_number=o.accession_number, form=o.form,
+                 filed=o.filed, relation=relation(o.filed))
+        for o in fact.other_values
+    ]  # fmt: skip
 
 
 def _digest(parts: tuple) -> str:
