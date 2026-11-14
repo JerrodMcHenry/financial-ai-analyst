@@ -17,8 +17,9 @@ JPMorgan Chase), and fact selection by explicit policy (`latest_filed`, `origina
 `same_filing`). M3.3 B2 adds deterministic comparisons: both values from one filing, an exact
 Decimal delta, and a percentage shown only for a positive base, with restatements reported
 separately. M3.4 joins them with BM25 retrieval into one evidence-backed analysis result
-(numbers from the comparison, verified candidate commentary from the same filing, no LLM). The
-LLM agent comes next. See [docs/architecture.md](docs/architecture.md) and
+(numbers from the comparison, verified candidate commentary from the same filing, no LLM). M3.5
+B1 adds a provider-independent tool-calling loop, tested with a scripted fake model, that
+produces unvalidated answer drafts. A live model and draft validation come next. See [docs/architecture.md](docs/architecture.md) and
 [docs/decisions.md](docs/decisions.md).
 
 ## Requirements
@@ -274,3 +275,25 @@ only if its citation verifies and it mentions the metric. A verified citation pr
 is exactly what the filing says, not that it explains the change, so passages are labeled
 candidates. The status is `complete`, `partial` (no usable commentary) or `abstained` (no
 reliable comparison), with reasons. Details: [docs/architecture.md](docs/architecture.md) §3.2l.
+
+## Tool-calling agent (scripted model, unvalidated drafts)
+
+```python
+from financial_analyst.agent import ModelTurn, ScriptedModel, ToolCall, run_agent
+
+# data and cache as in the analysis example above
+lookup = ToolCall(id="1", name="resolve_company", arguments={"identifier": "AAPL"})
+model = ScriptedModel(  # a stand-in for a live model adapter
+    [ModelTurn(tool_calls=[lookup]), ModelTurn(answer={"answer": "Apple resolved."})]
+)
+outcome = run_agent("Who is AAPL?", model, data=data, cache_dir=cache)
+print(outcome.status, outcome.draft_label, outcome.tool_results[0].output["cik"])
+```
+
+`run_agent` gives a model five tools over the pinned data (`resolve_company`, `get_fact`,
+`compare`, `commentary_filing`, `search_commentary`), validates every call, and returns tool
+errors to the model as data. A run is limited to 4 model turns, 6 tool calls, 90 seconds and
+one repair of a malformed draft. A draft refers to numbers only through tool `value_id`s and
+to passages through citation ids, and is always labeled `unvalidated_draft`: checking it and
+rendering a verified answer is M3.5 B2. No live model is connected. Details:
+[docs/architecture.md](docs/architecture.md) §3.2m.

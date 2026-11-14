@@ -231,7 +231,7 @@ def explain_change(
     reasons = []
     if comparison.change.percent.status != "computed":
         reasons.append(comparison.change.percent.note)
-    retrieval, evidence, rejected, why_not = _commentary(comparison, query, cache_dir, k)
+    retrieval, evidence, rejected, why_not = retrieve_commentary(comparison, query, cache_dir, k)
     reasons.extend(why_not)
     return GroundedResult(
         status="complete" if evidence else "partial",
@@ -251,9 +251,12 @@ def default_query(cik: str, metric: Metric) -> str:
     return f"{METRIC_TERMS[(cik, metric)]} {CHANGE_TERMS[cik]}"
 
 
-def _commentary(
-    comparison: Comparison, query: str | None, cache_dir: Path, k: int
+def retrieve_commentary(
+    comparison: Comparison, query: str | None, cache_dir: Path, k: int = DEFAULT_K
 ) -> tuple[RetrievalScope | None, list[CandidatePassage], list[RejectedPassage], list[str]]:
+    """Candidate commentary for a comparison, from its commentary filing only: the search
+    scope (None if the filing is unavailable), evidence, rejected hits, and reasons when
+    there is no evidence. Used by explain_change and by the agent's search tool."""
     filing = comparison.commentary_filing
     name = f"{filing.form} {filing.accession_number}"
     document = load_filing_document(cache_dir, filing)  # never downloads

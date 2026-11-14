@@ -568,7 +568,7 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - Percentages with absolute-value bases: rejected for this policy.
 
 ## D-034 Evidence-backed analysis: same-filing numbers, verified candidate commentary, no LLM
-**Status:** Proposed (M3.4, 2026-11-14)
+**Status:** Accepted (M3.4, 2026-11-14)
 **Decision:** `explain_change` returns one `GroundedResult` that joins `compare_periods` with BM25 retrieval and batch citation verification, all offline (architecture §3.2l).
 - **Numbers:** only from the `Comparison`. The summary is a fixed template over its fields; no figure is computed or restated anywhere else.
 - **Commentary scope:** only the comparison's commentary filing, from the filing cache. The index holds only that document's passages. Its MD&A section (10-K Item 7, 10-Q Part I, Item 2) is searched when the extractor found that label reliably; otherwise the whole verified filing. A filing that is missing or fails integrity checks is never fetched or substituted.
@@ -587,3 +587,22 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - Treating the top hit as the explanation: rejected, because it would present a lexical match as a causal claim.
 - Falling back to another filing's commentary, or broadening a missing section label to the whole filing for 10-Ks: rejected for numbers-to-narrative consistency. Only filings with no reliable label at all are searched whole.
 - Semantic retrieval: not adopted (D-028); BM25 stays the default.
+
+## D-035 Provider-independent tool-calling loop with structured, unvalidated drafts
+**Status:** Proposed (M3.5 B1, 2026-11-14)
+**Decision:** `agent.py` runs a bounded tool-calling loop against a one-method model interface, `complete(messages, tools) -> ModelTurn`, tested with a scripted fake model (architecture §3.2m).
+- **Tools:** five narrow adapters over existing code (`resolve_company`, `get_fact`, `compare`, `commentary_filing`, `search_commentary`). Arguments are strict pydantic schemas with no extra fields. No tool accepts a path, URL or data source; comparisons are referenced by a `comparison_id` from the same run.
+- **Errors:** tool-side problems (unknown tool, malformed arguments, unsupported company or metric, unresolvable period, unexpected exception) are returned to the model as structured errors. Model-side problems (exception, malformed turn) end the run.
+- **Limits:** 4 model turns (including the repair), 6 tool calls, 90 seconds checked between steps, 1 structured-output repair. A turn that would exceed the call budget runs none of its calls; tools requested in the last allowed turn are not run.
+- **Drafts:** numbers appear only as `{placeholder}`s mapped to tool `value_id`s; passages only as citation ids; at most three quotes of 300 characters. Only the structure is checked, and every draft is labeled `unvalidated_draft`.
+- **Deferred to B2:** checking references and quotes against this run's tool results, server-side rendering, and a live provider adapter.
+
+**Why:**
+- A single small interface keeps provider code out of the loop, so the scripted model tests the exact path a live adapter will use.
+- Placeholders and ids make every number traceable to a deterministic tool, and let B2 reject or render them mechanically instead of parsing prose.
+- Returning tool errors as data lets a model correct itself within fixed limits, while model failures cannot loop.
+
+**Alternatives:**
+- An agent framework: rejected (no new dependency; the loop is about 80 lines).
+- Letting the model write numbers into the answer and checking them later by text matching: rejected for B1 drafts, because placeholders are exact and cheaper to validate.
+- A fake agent returning canned answers: rejected, because it would not exercise tool selection, validation or limits.

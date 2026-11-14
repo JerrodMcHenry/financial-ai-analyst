@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal periods, concept mapping, fact selection) committed; M3.3 B2 (deterministic same-filing comparisons and percentage change) approved; M3.4 (evidence-backed analysis: comparison plus verified candidate commentary, no LLM) awaiting review. No LLM or agent yet. Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal periods, concept mapping, fact selection) committed; M3.3 B2 (deterministic same-filing comparisons and percentage change) approved; M3.4 (evidence-backed analysis: comparison plus verified candidate commentary, no LLM) committed; M3.5 B1 (provider-independent tool-calling orchestration with a scripted fake model; unvalidated drafts) awaiting review. No live LLM provider yet. Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-14
 
 ---
@@ -860,7 +860,7 @@ compare_periods(submissions, facts, metric, current, prior, policy="same_filing"
 
 **Not implemented:** separately sourced comparisons (`latest_filed`, `original`) are refused with `policy_not_supported`. There is no automatic fallback to another filing.
 
-### 3.2l Milestone 3.4: evidence-backed financial analysis, no LLM (awaiting review)
+### 3.2l Milestone 3.4: evidence-backed financial analysis, no LLM (approved)
 
 Decision: D-034. Code: `explain_change`, `GroundedResult` and the offline CLI in `analysis.py` (one new module). It joins existing parts and re-implements none of them: no period, mapping, selection, arithmetic, retrieval or verification logic is duplicated.
 
@@ -921,6 +921,56 @@ explain_change(identifier, metric, current_period, prior_period, query=None, *, 
 - JPMorgan searches are not restricted to MD&A until 10-Q section detection handles its layout.
 - Only same-filing comparisons and the six mapped metrics are supported. The filing must already be cached; nothing is fetched.
 - Next: the M3 LLM tool-calling agent, which may propose these tool calls and draft prose, with every number checked against the `Comparison` and every citation against this result's verified evidence.
+
+### 3.2m Milestone 3.5 B1: tool-calling orchestration with a scripted model (awaiting review)
+
+Decision: D-035. Code: `agent.py` (one new module). `analysis._commentary` became the public `retrieve_commentary` so the search tool reuses it; nothing else in `analysis.py` or `financial_tools.py` changed.
+
+```
+run_agent(question, model, *, data, cache_dir, clock=time.monotonic) -> AgentRunResult
+  messages = [system prompt, user question]
+  loop (≤ 4 model turns, ≤ 6 tool calls, ≤ 90 s, ≤ 1 repair):
+    turn ← ModelTurn.model_validate(model.complete(messages, TOOL_SPECS))   ──✗ model_error
+    answer?  → AnswerDraft.model_validate ──✓ drafted (unvalidated)
+                                           ──✗ one repair message, else invalid_draft
+    tools?   → refuse the whole turn if it would exceed 6 calls (tool_call_limit)
+               or if it is the 4th turn (turn_limit: no turn left to use the results)
+             → execute_tool each call: unknown name / non-object / schema failure /
+               unsupported company / FinancialDataError / unexpected exception
+               all become ToolResult errors returned to the model as data
+  → AgentRunResult(status, draft, draft_label="unvalidated_draft", tool_results, messages, …)
+```
+
+**The model interface** is one method, `complete(messages, tools) -> ModelTurn`. A `ModelTurn` holds either tool calls (id, name, raw arguments) or a raw answer, never both. Anything else, or an exception, is a `model_error`. A live adapter (M3.5 B2 or later) only has to translate a provider's response into a `ModelTurn`; the loop, limits, tools and draft schema stay the same. `ScriptedModel` is the test double: its steps are fixed turns, raw dicts (malformed output) or functions of the conversation, so later steps read earlier tool results exactly as a live model would. It holds no financial data.
+
+**Tools** (arguments are pydantic models: `extra="forbid"`, validated in strict mode including nested periods, so `"2026"` is not coerced to 2026):
+
+| Tool | Arguments | Reuses | Returns |
+|---|---|---|---|
+| `resolve_company` | `identifier` (1–64 chars) | `resolve_company` against the pinned ticker map; refused unless the CIK has pinned data | CIK, name, tickers, mapped metrics |
+| `get_fact` | `cik`, `metric`, `period`, `policy` (`latest_filed`/`original`) | `resolve_period`, `get_fact` | `value_id` (= `observation_id`), exact value as a string, unit, concept, period, accession, policy |
+| `compare` | `cik`, `metric`, `current_period`, `prior_period` | `compare_periods` (same filing only) | `comparison_id`; `value_id`s `<comparison_id>/current`, `/prior`, `/delta`, `/percent`; percent status, exact, display; revisions |
+| `commentary_filing` | `comparison_id` from this run | `Comparison.commentary_filing`, `load_filing_document` | accession, form, dates, document URL, cached or not, expected MD&A label |
+| `search_commentary` | `comparison_id` from this run, optional `query` (≤ 500 chars) | `retrieve_commentary` (BM25 in the commentary filing, batch citation verification) | verified candidate passages with citation ids, rejected hits, reasons |
+
+**Data access:** no tool takes a path, URL, accession to fetch, or cache location. The pinned snapshots and cache directory are fixed by the caller of `run_agent`, and comparisons are reachable only by a `comparison_id` produced by `compare` in the same run. Nothing makes network requests.
+
+**Limits:** checked between steps; a step already running is not interrupted (the slowest, a JPMorgan 10-Q search, takes a few seconds). A turn that would exceed the call budget runs none of its calls. The repair is a model turn and counts against the four.
+
+**The four boundaries:**
+
+| Layer | Decides | Trusted for |
+|---|---|---|
+| Model decisions | Which tools to call, with which arguments; what answer to propose | Nothing: every call is validated, every output is data |
+| Deterministic tools | Identity, periods, facts, comparisons, retrieval and citation verification from pinned data | The values and citations they return (M3.3, M3.4 rules) |
+| Unvalidated answer draft (B1) | Answer text with `{placeholder}`s mapped to `value_id`s; up to 5 citation ids; up to 3 quotes of ≤ 300 chars | Structure only: fields, sizes, and that placeholders and declared values match |
+| Validated answer (B2, not built) | Whether each `value_id` and citation came from this run's tool results, quotes are verbatim in a verified passage, and no claim outruns the evidence; then server-side rendering of the numbers | Only after that validation |
+
+A draft is always labeled `draft_label: "unvalidated_draft"` with a fixed notice, and is never rendered as an answer in B1.
+
+**Scripted runs (pinned data):**
+- Apple FY2026 revenue: `resolve_company` → `compare` → `commentary_filing` + `search_commentary` → draft; 4 calls, 4 turns. Values 478,834,000,000 and 416,161,000,000, delta 62,673,000,000, 15.1%; candidates from 10-K Item 7.
+- JPMorgan Q3 2026 net income: `resolve_company` → `compare` → `search_commentary` → draft; 3 calls, 4 turns. 15,305,000,000 vs 14,393,000,000 (prior from the 10-Q's comparative), +912,000,000, 6.3%; first candidate "reported net income of $15.3 billion, up 6%".
 
 ### 3.3 Later milestone: ingestion
 
