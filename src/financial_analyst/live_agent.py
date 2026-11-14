@@ -4,7 +4,8 @@ Every command here sends requests to the configured LLM provider and may cost mo
 Nothing in the automated test suite runs it against a real provider.
 
     python -m financial_analyst.live_agent ask "How much did Apple's revenue grow in FY2026?"
-    python -m financial_analyst.live_agent eval            # the two smoke cases only
+    python -m financial_analyst.live_agent eval            # the two smoke cases only;
+                                                           # exits 1 if any case fails a check
     python -m financial_analyst.live_agent eval --cases ID,ID
     python -m financial_analyst.live_agent eval --all      # every live-eligible case
 
@@ -16,6 +17,7 @@ printed; the model's draft never is.
 import argparse
 import statistics
 import sys
+from collections import Counter
 from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
@@ -44,6 +46,43 @@ QUESTION_DRIVEN_ADVERSARIAL = frozenset({"prompt-injection-in-question"})
 _MODEL_ERRORS = frozenset({"unknown_tool", "invalid_arguments"})
 
 
+class ToolStep(BaseModel):
+    name: str  # as the model named it (at most 64 characters)
+    ok: bool
+    error_code: str | None  # the structured code only, never the message or arguments
+
+
+class RunDiagnostics(BaseModel):
+    """What a run did, from its typed results: no arguments, payloads or configuration."""
+
+    tools: list[ToolStep]  # in call order
+    tool_counts: dict[str, int]
+    model_turns: int
+    terminal_reason: str  # the run status, with the loop's reason when it did not draft
+    reached: dict[str, bool]  # compare / search_commentary succeeded; submit_answer attempted
+    issue_codes: list[str]  # grounding validation issues
+
+
+def diagnose(run: AgentRunResult, answer: GroundedAnswer) -> RunDiagnostics:
+    steps = [ToolStep(name=r.call.name, ok=r.ok, error_code=r.error.code if r.error else None)
+             for r in run.tool_results]  # fmt: skip
+    succeeded = {s.name for s in steps if s.ok}
+    reason = run.status if run.status == "drafted" else f"{run.status}: {(run.error or '')[:200]}"
+    return RunDiagnostics(
+        tools=steps,
+        tool_counts=dict(Counter(s.name for s in steps)),
+        model_turns=run.model_turns,
+        terminal_reason=reason,
+        reached={
+            "compare": "compare" in succeeded,
+            "search_commentary": "search_commentary" in succeeded,
+            # An answer turn was produced (valid or not): an assistant message without calls.
+            "submit_answer": any(m.role == "assistant" and not m.tool_calls for m in run.messages),
+        },  # fmt: skip
+        issue_codes=[i.code for i in answer.issues],
+    )
+
+
 class LiveCaseResult(BaseModel):
     id: str
     run_status: str
@@ -57,6 +96,7 @@ class LiveCaseResult(BaseModel):
     model_turns: int
     usage: Usage
     error: str | None
+    diagnostics: RunDiagnostics
 
 
 class LiveEvalReport(BaseModel):
@@ -112,6 +152,7 @@ def evaluate_live(
             grounding_pass=None if run.status != "drafted" else not answer.issues,
             checks=checks, failures=failures, tool_calls=len(run.tool_results),
             model_turns=run.model_turns, usage=usage, error=run.error,
+            diagnostics=diagnose(run, answer),
         ))  # fmt: skip
 
     def rate(name: str) -> tuple[int, int]:
@@ -252,16 +293,43 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     _print_report(report, settings)
     if args.output:
         args.output.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
-    return 0
+    # Nonzero when any selected case failed a check; the full report is printed (and written)
+    # either way.
+    return 1 if any(r.failures for r in report.results) else 0
+
+
+def format_case(result: LiveCaseResult) -> str:
+    """One case's diagnostics. Tool names, outcomes and error codes only."""
+    d, usage = result.diagnostics, result.usage
+    verdict = "ok  " if not result.failures else "FAIL"
+    tools = " > ".join(f"{s.name} {'ok' if s.ok else s.error_code}" for s in d.tools) or "none"
+    reached = ", ".join(f"{name} {'yes' if hit else 'no'}" for name, hit in d.reached.items())
+    cost = (
+        "cost not estimated"
+        if usage.estimated_cost_usd is None
+        else (f"~${usage.estimated_cost_usd:.4f}")
+    )
+    lines = [
+        f"{verdict} {result.id}: agent {result.run_status}, answer {result.status} "
+        f"(expected {result.expected_status})",
+        f"    tools ({_count(len(d.tools), 'call')}, {_count(d.model_turns, 'turn')}): {tools}",
+        f"    reached: {reached}",
+        f"    ended: {d.terminal_reason}",
+        f"    grounding issues: {', '.join(d.issue_codes) or 'none'}",
+        f"    {usage.requests} requests, {usage.prompt_tokens} prompt + "
+        f"{usage.completion_tokens} completion tokens, {cost}, {usage.latency_seconds:.1f} s",
+    ]
+    lines += [f"    check failed: {failure}" for failure in result.failures]
+    return "\n".join(lines)
+
+
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}" + ("" if n == 1 else "s")
 
 
 def _print_report(report: LiveEvalReport, settings: ProviderSettings) -> None:
     for result in report.results:
-        print(f"{result.id:<34} {result.run_status:<16} {result.status:<10} "
-              f"(expected {result.expected_status}) {result.tool_calls} calls, "
-              f"{result.model_turns} turns, {result.usage.latency_seconds:.1f} s")  # fmt: skip
-        for failure in result.failures:
-            print(f"    {failure}")
+        print(format_case(result))
     print(f"attempted              {report.attempted}")
     for name, (passed, total) in report.metrics.items():
         print(f"{name:<22} {passed}/{total}")

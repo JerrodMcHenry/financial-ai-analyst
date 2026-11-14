@@ -593,7 +593,7 @@ Nothing here rejects semantic or hybrid retrieval in general.
 **Decision:** `agent.py` runs a bounded tool-calling loop against a one-method model interface, `complete(messages, tools) -> ModelTurn`, tested with a scripted fake model (architecture §3.2m).
 - **Tools:** five narrow adapters over existing code (`resolve_company`, `get_fact`, `compare`, `commentary_filing`, `search_commentary`). Arguments are strict pydantic schemas with no extra fields. No tool accepts a path, URL or data source; comparisons are referenced by a `comparison_id` from the same run.
 - **Errors:** tool-side problems (unknown tool, malformed arguments, unsupported company or metric, unresolvable period, unexpected exception) are returned to the model as structured errors. Model-side problems (exception, malformed turn) end the run.
-- **Limits:** 4 model turns (including the repair), 6 tool calls, 90 seconds checked between steps, 1 structured-output repair. A turn that would exceed the call budget runs none of its calls; tools requested in the last allowed turn are not run.
+- **Limits:** 4 model turns (raised to 6 by D-038; including the repair), 6 tool calls, 90 seconds checked between steps, 1 structured-output repair. A turn that would exceed the call budget runs none of its calls; tools requested in the last allowed turn are not run.
 - **Drafts:** numbers appear only as `{placeholder}`s mapped to tool `value_id`s; passages only as citation ids; at most three quotes of 300 characters. Only the structure is checked, and every draft is labeled `unvalidated_draft`.
 - **Deferred to B2:** checking references and quotes against this run's tool results, server-side rendering, and a live provider adapter.
 
@@ -629,7 +629,7 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - Re-running full citation verification on every answer: optional (`full_reverify`). The run already verified each passage in the same process, and the cheap checks catch changed bytes and altered text.
 
 ## D-037 One OpenAI-compatible adapter behind the existing Model interface
-**Status:** Proposed (M3.6 B1, 2026-11-14)
+**Status:** Accepted (M3.6 B1, 2026-11-14)
 **Decision:** live models connect only through `llm_provider.OpenAICompatibleModel.complete(messages, tools)` (architecture §3.2o).
 - **Format:** OpenAI-compatible Chat Completions over httpx, with no SDK or new dependency. Tools are functions, and the answer draft is a `submit_answer` function call whose parameters are the `AnswerDraft` schema. Provider call IDs are kept.
 - **Requests:** one per model turn and never retried. Provider errors, malformed responses and timeouts end the run as `model_error`. Each request's timeout never exceeds what is left of the 90-second run.
@@ -646,3 +646,33 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - A provider SDK: rejected for now (new dependency, hidden retries by default).
 - Provider-native structured output (`response_format`): deferred, because support varies across compatible servers.
 - Live tests inside pytest behind a skip marker: rejected; they would make "0 skipped" meaningless. Live runs stay in the CLI.
+
+## D-038 Six model turns, a workflow prompt, and diagnosable live runs
+**Status:** Proposed (M3.6 B2.1, 2026-11-14)
+**Context:** the first live smoke tests (GPT-5.4 mini, two cases, 7 requests, ~$0.0127) made one tool call per turn. Resolve → compare → search → answer needs exactly four turns, so Apple answered without commentary (partial) and JPMorgan ran out of turns (abstained). No provider or schema errors occurred, and the validator rejected nothing incorrectly.
+**Decision:**
+- **Turns:** `MAX_MODEL_TURNS` rises from 4 to 6 (a repair still counts). Unchanged: 6 tool calls, 90 seconds, one repair, request timeouts capped by the run's remaining time. Tools requested in the last allowed turn are still never run, and an invalid draft on the last turn gets no repair.
+- **Prompt:** the system prompt is built from the pinned data. It lists the supported companies (name, CIK, mapped metrics; no figures) and states the workflow:
+  1. identify the company (use a listed CIK directly when unambiguous, otherwise `resolve_company`) and the periods;
+  2. `compare`;
+  3. `search_commentary` for questions about a change, but not again if it finds nothing;
+  4. submit the draft with tool value IDs and citation IDs only.
+
+  It also says never to invent IDs, and how to handle errors and the budget.
+- **Diagnostics:** each live case reports, from the typed run results:
+  - ordered tool names with ok or error code, and per-tool counts;
+  - model turns, and the terminal reason;
+  - whether `compare` and `search_commentary` succeeded and whether an answer was submitted;
+  - grounding issue codes, tokens, cost and latency.
+
+  It never reports tool arguments, error messages, provider payloads or configuration.
+- **Exit code:** `live_agent eval` exits 1 when any selected case fails a check, after printing (and writing) the full report.
+
+**Why:**
+- Two extra turns let the observed one-call-per-turn style reach the full path, with room for one correction. The call budget, which bounds tool work and cost, is unchanged.
+- Listing the supported companies saves a turn without hardcoding any answer. The figures still come only from `compare`.
+- Without the tool sequence, the first JPMorgan failure couldn't be explained. Codes and names are enough to diagnose, and safe to share.
+
+**Alternatives:**
+- Letting `compare` take a company name: rejected for now, because it would merge identity resolution into a financial tool.
+- Forcing `search_commentary` in code: rejected, because some questions need no commentary. The prompt asks for it, and the evaluation labels check it.

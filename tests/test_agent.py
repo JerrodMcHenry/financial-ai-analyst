@@ -25,6 +25,7 @@ from financial_analyst.agent import (
 )
 from financial_analyst.analysis import load_pinned_data
 from financial_analyst.config import Settings
+from financial_analyst.grounding import ground
 
 APPLE, JPM = "0000320193", "0000019617"
 APPLE_10K, JPM_10Q = "0000320193-26-000026", "0001628280-26-069523"
@@ -86,6 +87,7 @@ def growth_answer(compare_id: str, search_id: str | None, subject: str):
     def step(messages, specs):
         comparison = output(messages, compare_id)
         draft = {
+            "subject": comparison["comparison_id"],
             "answer": f"{subject} was {{current}} versus {{prior}}, a change of {{delta}} "
             "({growth}).",
             "values": [
@@ -362,9 +364,86 @@ def test_the_turn_limit_stops_a_model_that_never_answers():
     steps = [tools(call(f"c{i}", "resolve_company", identifier="AAPL")) for i in range(9)]
     model = ScriptedModel(steps)
     outcome = run(model)
-    assert outcome.status == "turn_limit" and outcome.model_turns == MAX_MODEL_TURNS == 4
-    assert len(model.received) == 4
-    assert len(outcome.tool_results) == 3  # the last turn's request is not executed
+    assert outcome.status == "turn_limit" and outcome.model_turns == MAX_MODEL_TURNS == 6
+    assert len(model.received) == 6
+    # Five turns ran their call; the sixth turn's request is refused, since no turn would
+    # remain to read its result.
+    assert [r.call.id for r in outcome.tool_results] == ["c0", "c1", "c2", "c3", "c4"]
+
+
+@pinned
+def test_an_invalid_draft_on_the_last_turn_gets_no_repair():
+    steps = [tools(call(f"c{i}", "resolve_company", identifier="AAPL")) for i in range(5)]
+    model = ScriptedModel([*steps, BAD, PLAIN])
+    outcome = run(model)
+    assert outcome.status == "invalid_draft" and not outcome.repair_attempted
+    assert len(model.received) == 6
+
+
+def compare_call(call_id, cik, current=FY2026, prior=FY2025):
+    return call(call_id, "compare", cik=cik, metric="revenue", current_period=current,
+                prior_period=prior)  # fmt: skip
+
+
+@pinned
+def test_a_five_turn_workflow_completes():
+    model = ScriptedModel([
+        tools(call("r", "resolve_company", identifier="Apple")),
+        lambda m, t: tools(compare_call("c", output(m, "r")["cik"])),
+        lambda m, t: tools(call("f", "commentary_filing",
+                                comparison_id=output(m, "c")["comparison_id"])),
+        lambda m, t: tools(call("s", "search_commentary",
+                                comparison_id=output(m, "c")["comparison_id"])),
+        growth_answer("c", "s", "Apple's total net sales"),
+    ])  # fmt: skip
+    outcome = run(model)
+    assert outcome.status == "drafted" and outcome.model_turns == 5
+    assert ground(outcome, data=DATA, cache_dir=CACHE).status == "complete"
+
+
+@pinned
+def test_a_corrected_tool_error_fits_in_six_turns():
+    q4 = {"kind": "fiscal_quarter", "fiscal_year": 2026, "quarter": 4}
+    model = ScriptedModel([
+        tools(call("r", "resolve_company", identifier="AAPL")),  # unnecessary, but harmless
+        tools(compare_call("bad", APPLE, current=q4)),  # Q4 is not reported separately
+        lambda m, t: tools(compare_call("c", APPLE)),  # the model corrects the period
+        lambda m, t: tools(call("s", "search_commentary",
+                                comparison_id=output(m, "c")["comparison_id"])),
+        lambda m, t: tools(call("f", "commentary_filing",
+                                comparison_id=output(m, "c")["comparison_id"])),
+        growth_answer("c", "s", "Apple's total net sales"),
+    ])  # fmt: skip
+    outcome = run(model)
+    assert outcome.status == "drafted" and outcome.model_turns == 6
+    assert [(r.call.id, r.error.code if r.error else None) for r in outcome.tool_results] == [
+        ("r", None), ("bad", "period_not_supported"), ("c", None), ("s", None), ("f", None)
+    ]  # fmt: skip
+    answer = ground(outcome, data=DATA, cache_dir=CACHE)
+    assert answer.status == "complete" and answer.current.formatted == "$478,834,000,000"
+
+
+@pinned
+def test_an_unnecessary_resolution_then_a_direct_comparison():
+    model = ScriptedModel([
+        tools(call("r", "resolve_company", identifier="AAPL")),
+        tools(compare_call("c", APPLE)),  # the pinned CIK used directly
+        lambda m, t: tools(call("s", "search_commentary",
+                                comparison_id=output(m, "c")["comparison_id"])),
+        growth_answer("c", "s", "Apple's total net sales"),
+    ])  # fmt: skip
+    answer = ground(run(model), data=DATA, cache_dir=CACHE)
+    assert answer.status == "complete" and answer.delta_formatted == "+$62,673,000,000"
+
+
+@pinned
+def test_the_prompt_lists_supported_companies_without_figures():
+    model = ScriptedModel([PLAIN])
+    run(model)
+    prompt = model.received[0][0].content
+    assert "Apple Inc.: CIK 0000320193" in prompt and "CIK 0000019617" in prompt
+    assert "compare" in prompt and "search_commentary" in prompt and "6 turns" in prompt
+    assert not any(figure in prompt for figure in ("478", "416", "15,305", "15.1"))
 
 
 class FakeClock:
@@ -465,3 +544,83 @@ def test_a_question_must_be_reasonable():
     for question in ("  ", "x" * 1001):
         with pytest.raises(ValueError):
             run_agent(question, ScriptedModel([PLAIN]), data=DATA, cache_dir=CACHE)
+
+
+# --- Quotation attribution (M3.6 B2.3) --------------------------------------------------------
+
+MDA_LABELS = {"Item 7", "Part I, Item 2"}
+
+
+def quoting_answer(compare_id: str, search_id: str, attribution: str | None = None):
+    """Quote the first passage. Without an explicit attribution, follow the prompt's rule:
+    "management" only for a passage whose returned section is an MD&A label."""
+
+    def step(messages, specs):
+        comparison = output(messages, compare_id)
+        passage = output(messages, search_id)["evidence"][0]
+        chosen = attribution or ("management" if passage["section"] in MDA_LABELS else "filing")
+        excerpt = min(passage["text"].split("\n\n"), key=lambda s: (len(s) > 300, -len(s)))
+        return ModelTurn(answer={
+            "subject": comparison["comparison_id"],
+            "answer": "{company} {metric} changed by {delta}.",
+            "values": [{"placeholder": "delta", "value_id": comparison["delta"]["value_id"]}],
+            "citations": [passage["citation_id"]],
+            "quotes": [{"citation_id": passage["citation_id"], "text": excerpt,
+                        "attribution": chosen}],
+        })  # fmt: skip
+
+    return step
+
+
+def quoting_run(cik, metric, current, prior, attribution=None):
+    model = ScriptedModel([
+        tools(call("c", "compare", cik=cik, metric=metric, current_period=current,
+                   prior_period=prior)),
+        lambda m, t: tools(call("s", "search_commentary",
+                                comparison_id=output(m, "c")["comparison_id"])),
+        quoting_answer("c", "s", attribution),
+    ])  # fmt: skip
+    return run(model)
+
+
+@pinned
+def test_the_prompt_states_the_attribution_rule():
+    model = ScriptedModel([PLAIN])
+    run(model)
+    prompt = model.received[0][0].content
+    assert '"Item 7" in a 10-K' in prompt and '"Part I, Item 2" in a 10-Q' in prompt
+    assert 'Otherwise use "filing"' in prompt
+    assert "section is null is\n   never attributed to management" in prompt
+    assert "Do not infer management from the company name" in prompt
+
+
+@pinned
+@pytest.mark.parametrize(
+    ("cik", "metric", "current", "prior", "section", "attribution", "rendered"),
+    [
+        (APPLE, "revenue", FY2026, FY2025, "Item 7", "management",
+         f"Apple Inc. management, 10-K {APPLE_10K}, Item 7 (MD&A)"),
+        (JPM, "net_income", Q3_2026, Q3_2025, None, "filing",
+         f"JPMORGAN CHASE & CO 10-Q {JPM_10Q}"),
+    ],
+)  # fmt: skip
+def test_attribution_follows_the_returned_section(cik, metric, current, prior, section,
+                                                  attribution, rendered):  # fmt: skip
+    outcome = quoting_run(cik, metric, current, prior)
+    passage = outcome.tool_results[1].output["evidence"][0]
+    assert passage["section"] == section  # Apple: labeled MD&A; JPMorgan: sectionless
+    assert outcome.draft.quotes[0].attribution == attribution
+    answer = ground(outcome, data=DATA, cache_dir=CACHE)
+    assert answer.status == "complete" and answer.issues == []
+    assert [q.attribution for q in answer.quotations] == [rendered]
+
+
+@pinned
+def test_management_attribution_of_a_sectionless_passage_is_still_rejected():
+    # The live JPMorgan failure (M3.6 B2.2), reproduced: the grounding rule is unchanged.
+    outcome = quoting_run(JPM, "net_income", Q3_2026, Q3_2025, attribution="management")
+    answer = ground(outcome, data=DATA, cache_dir=CACHE)
+    assert answer.status == "partial" and [i.code for i in answer.issues] == [
+        "attribution_unsupported"
+    ]
+    assert answer.quotations == [] and answer.citations  # the passage remains a candidate

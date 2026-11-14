@@ -26,7 +26,15 @@ from decimal import Decimal
 from typing import Any, Literal
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from financial_analyst.agent import (
@@ -47,12 +55,18 @@ _ERROR_TEXT_CHARS = 200
 
 
 class ProviderSettings(BaseSettings):
-    """LLM_API_KEY, LLM_MODEL and optional LLM_* settings, from the environment (or the
-    git-ignored .env file through pydantic-settings; this code never reads it itself)."""
+    """LLM_API_KEY (or OpenAI's conventional OPENAI_API_KEY), LLM_MODEL and optional LLM_*
+    settings, from the environment (or the git-ignored .env file through pydantic-settings;
+    this code never reads it itself)."""
 
-    model_config = SettingsConfigDict(env_prefix="LLM_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="LLM_", env_file=".env", extra="ignore", populate_by_name=True
+    )
 
-    api_key: SecretStr = Field(min_length=1)
+    # LLM_API_KEY wins when both are set.
+    api_key: SecretStr = Field(
+        min_length=1, validation_alias=AliasChoices("LLM_API_KEY", "OPENAI_API_KEY")
+    )
     model: str = Field(min_length=1, max_length=200)
     base_url: str = "https://api.openai.com/v1"
     # Per request; never more than the whole run may take.
@@ -82,10 +96,16 @@ def load_provider_settings(**overrides: Any) -> ProviderSettings:
     except ValidationError as exc:
         # Only field names and error types: pydantic's own message can echo input values.
         problems = sorted(
-            f"LLM_{str(e['loc'][0]).upper()} ({'missing' if e['type'] == 'missing' else 'invalid'})"
+            f"{_setting_name(e['loc'][0])} ({'missing' if e['type'] == 'missing' else 'invalid'})"
             for e in exc.errors()
         )
         raise ProviderConfigError("LLM provider configuration: " + ", ".join(problems)) from None
+
+
+def _setting_name(field: object) -> str:
+    if str(field).upper() in ("API_KEY", "LLM_API_KEY", "OPENAI_API_KEY"):
+        return "LLM_API_KEY (or OPENAI_API_KEY)"
+    return f"LLM_{str(field).upper()}"
 
 
 ProviderErrorKind = Literal["timeout", "http_error", "transport", "malformed_response"]

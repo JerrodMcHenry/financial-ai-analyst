@@ -295,7 +295,7 @@ print(outcome.status, outcome.draft_label, outcome.tool_results[0].output["cik"]
 
 `run_agent` gives a model five tools over the pinned data (`resolve_company`, `get_fact`,
 `compare`, `commentary_filing`, `search_commentary`), validates every call, and returns tool
-errors to the model as data. A run is limited to 4 model turns, 6 tool calls, 90 seconds and
+errors to the model as data. A run is limited to 6 model turns, 6 tool calls, 90 seconds and
 one repair of a malformed draft. A draft refers to numbers only through tool `value_id`s and
 to passages through citation ids, and is always labeled `unvalidated_draft`: checking it and
 rendering a verified answer is M3.5 B2. No live model is connected. Details:
@@ -342,10 +342,12 @@ export LLM_MODEL="your-model-id"
 uv run python -m financial_analyst.live_agent ask "How much did Apple's revenue grow in fiscal 2026?"
 uv run python -m financial_analyst.live_agent eval                  # two smoke cases
 uv run python -m financial_analyst.live_agent eval --all --output live.json   # 19 cases
+# eval prints per-case diagnostics (tools, error codes, how the run ended) and exits 1 if any
+# case fails its checks
 ```
 
 These commands send requests to the provider and may cost money. A question makes at most
-4 requests, and each one resends the conversation so far, including tool outputs. Only the
+6 requests, and each one resends the conversation so far, including tool outputs. Only the
 server-rendered, grounded answer is printed, never the model's draft. Without a key or model
 the command names the missing setting and sends nothing. `uv run pytest` never contacts a
 provider: the adapter is tested against mocked responses. Details:

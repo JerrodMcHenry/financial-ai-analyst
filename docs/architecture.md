@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal periods, concept mapping, fact selection) committed; M3.3 B2 (deterministic same-filing comparisons and percentage change) approved; M3.4 (evidence-backed analysis: comparison plus verified candidate commentary, no LLM) committed; M3.5 B1 (provider-independent tool-calling orchestration with a scripted fake model) committed; M3.5 B2 (deterministic grounding, server-rendered answers, offline agent evaluation) committed; M3.6 B1 (OpenAI-compatible live provider adapter and live CLI; no live request made yet) awaiting review. A live LLM provider adapter exists but has not been run against a real provider. Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal periods, concept mapping, fact selection) committed; M3.3 B2 (deterministic same-filing comparisons and percentage change) approved; M3.4 (evidence-backed analysis: comparison plus verified candidate commentary, no LLM) committed; M3.5 B1 (provider-independent tool-calling orchestration with a scripted fake model) committed; M3.5 B2 (deterministic grounding, server-rendered answers, offline agent evaluation) committed; M3.6 B1 (OpenAI-compatible live provider adapter and live CLI) committed; M3.6 B2 first live smoke tests run (two cases; neither complete); M3.6 B2.1 (six turns, workflow prompt, live diagnostics) awaiting review. A live LLM provider adapter exists; only the two authorized smoke tests have been run against a real provider. Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-14
 
 ---
@@ -929,12 +929,12 @@ Decision: D-035. Code: `agent.py` (one new module). `analysis._commentary` becam
 ```
 run_agent(question, model, *, data, cache_dir, clock=time.monotonic) -> AgentRunResult
   messages = [system prompt, user question]
-  loop (≤ 4 model turns, ≤ 6 tool calls, ≤ 90 s, ≤ 1 repair):
+  loop (≤ 6 model turns — 4 until M3.6 B2.1 — ≤ 6 tool calls, ≤ 90 s, ≤ 1 repair):
     turn ← ModelTurn.model_validate(model.complete(messages, TOOL_SPECS))   ──✗ model_error
     answer?  → AnswerDraft.model_validate ──✓ drafted (unvalidated)
                                            ──✗ one repair message, else invalid_draft
     tools?   → refuse the whole turn if it would exceed 6 calls (tool_call_limit)
-               or if it is the 4th turn (turn_limit: no turn left to use the results)
+               or if it is the last allowed turn (turn_limit: no turn left to use the results)
              → execute_tool each call: unknown name / non-object / schema failure /
                unsupported company / FinancialDataError / unexpected exception
                all become ToolResult errors returned to the model as data
@@ -955,7 +955,7 @@ run_agent(question, model, *, data, cache_dir, clock=time.monotonic) -> AgentRun
 
 **Data access:** no tool takes a path, URL, accession to fetch, or cache location. The pinned snapshots and cache directory are fixed by the caller of `run_agent`, and comparisons are reachable only by a `comparison_id` produced by `compare` in the same run. Nothing makes network requests.
 
-**Limits:** checked between steps; a step already running is not interrupted (the slowest, a JPMorgan 10-Q search, takes a few seconds). A turn that would exceed the call budget runs none of its calls. The repair is a model turn and counts against the four.
+**Limits:** checked between steps; a step already running is not interrupted (the slowest, a JPMorgan 10-Q search, takes a few seconds). A turn that would exceed the call budget runs none of its calls. The repair is a model turn and counts against the turn limit (six since M3.6 B2.1, D-038).
 
 **The four boundaries:**
 
@@ -1076,7 +1076,7 @@ The first run found one scoring defect: the answer echoes the user's question, w
 - a research endpoint;
 - reliable MD&A labels for JPMorgan's 10-Q.
 
-### 3.2o Milestone 3.6 B1: live provider adapter and live CLI (awaiting review)
+### 3.2o Milestone 3.6 B1: live provider adapter and live CLI (approved)
 
 Decision: D-037. Code: `llm_provider.py` (the only provider-specific module) and `live_agent.py` (CLI and live evaluation). `agent_eval.check_case` was factored out of `score_case` so live runs are scored with exactly the same checks. The agent loop, tools, limits, grounding validator and renderer are unchanged and remain authoritative.
 
@@ -1085,7 +1085,7 @@ live_agent ask "question"
   load_provider_settings()          LLM_API_KEY, LLM_MODEL missing → named, exit 2, nothing sent
   load_pinned_data(manifest, cache) five pinned snapshots; filings read from the cache by the tools
   OpenAICompatibleModel(settings)   one per run
-  run_agent(question, model, …)     same tools, 6 calls, 4 turns, 90 s, 1 repair
+  run_agent(question, model, …)     same tools, 6 calls, 6 turns (D-038), 90 s, 1 repair
      └─ complete(messages, tools) ─▶ POST {LLM_BASE_URL}/chat/completions   (one request, no retry)
   ground(run, …)                    validator + server renderer
   print format_answer(answer)       server-rendered answer, provenance, citations, status; never the draft
@@ -1107,7 +1107,7 @@ live_agent ask "question"
   - HTTP status ≥ 400 → `http_error`; non-JSON body → `malformed_response`; timeout → `timeout`; other transport error → `transport`;
   - redirects are not followed;
   - each `complete()` sends exactly one request and never retries;
-  - the run's existing limits (6 tool calls, 4 model turns, one repair) bound the number of requests to at most 4 per question.
+  - the run's existing limits (6 tool calls, 6 model turns, one repair) bound the number of requests to at most 6 per question.
 - **Timeouts:** each request's timeout is the smaller of `LLM_REQUEST_TIMEOUT_SECONDS` (default 30, at most 90) and what remains of the 90-second run budget, counted from the adapter's first request. Once the budget is spent, no request is sent. The agent loop's own deadline checks still apply.
 
 **Configuration (environment, or the git-ignored `.env` via pydantic-settings; the code never opens it):**
@@ -1146,9 +1146,9 @@ live_agent ask "question"
 - Scripted-model results (§3.2n) are not live-model results.
 
 **Cost considerations:**
-- One question makes at most 4 requests. Each request resends the conversation, including tool outputs: comparisons, plus up to five ~2,000-character passages per search.
+- One question makes at most 6 requests. Each request resends the conversation, including tool outputs: comparisons, plus up to five ~2,000-character passages per search.
 - Prompt tokens therefore grow per turn, and dominate.
-- The smoke test is 2 questions, so at most 8 requests. `--all` is up to 76 requests.
+- The smoke test is 2 questions, so at most 12 requests. `--all` is up to 114 requests.
 - Without configured prices, cost is reported as "not estimated".
 
 **Known limitations:**
@@ -1156,6 +1156,51 @@ live_agent ask "question"
 - Only the Chat Completions format is implemented. No streaming.
 - Model output varies run to run, so live results need repeated sampling before conclusions.
 - A provider that ignores `submit_answer` and replies in prose gets one repair turn, then `invalid_draft`.
+
+### 3.2p Milestone 3.6 B2 and B2.1: first live smoke tests, and orchestration changes (B2.1 awaiting review)
+
+Decision: D-038.
+
+**B2: first live smoke tests (GPT-5.4 mini, 2026-11-14).**
+- **Configuration:** `LLM_MODEL=gpt-5.4-mini`, with prices set to $0.75 input and $4.50 output per million tokens.
+- **Key name:** the adapter now also accepts the conventional `OPENAI_API_KEY`; `LLM_API_KEY` wins if both are set.
+- **Compatibility:** checked offline beforehand (non-strict function tools, object roots, resolvable `$defs`). No probe request was made.
+
+| Case | Requests / tool calls / turns | Agent → answer | Figures | Tokens (in / out) | Est. cost | Latency |
+|---|---|---|---|---|---|---|
+| Apple FY2026 vs FY2025 revenue | 3 / 2 / 3 | drafted → partial (no commentary search) | correct | 5,316 / 414 | $0.0058 | 6.4 s |
+| JPMorgan Q3 2026 vs Q3 2025 net income | 4 / 3 / 4 | turn_limit → abstained | none | 7,889 / 200 | $0.0068 | 3.9 s |
+
+There were no provider or schema errors. The model made one tool call per turn, so a resolve → compare → search → answer path used the whole four-turn budget. The report did not then record tool names, so the JPMorgan sequence could not be diagnosed.
+
+**B2.1 changes (offline only; no live request since B2):**
+- **Turns:** `MAX_MODEL_TURNS` 4 → 6. Tool calls (6), the 90-second run, one repair and request timeouts are unchanged. Tools requested on the last allowed turn are never run, and an invalid draft on that turn gets no repair.
+- **Prompt:** `agent.system_prompt(data)` replaces the fixed prompt. It states the workflow (identify company and periods, `compare`, `search_commentary` for questions about a change, then submit with tool IDs only; never invent IDs; on an empty search, answer with the figures). It lists the supported companies from the pinned data: name, CIK and mapped metrics, no figures.
+- **Diagnostics:** `live_agent.diagnose` derives per-case diagnostics from the typed run:
+  - ordered tool steps (name, ok or error code) and counts;
+  - model turns and the terminal reason;
+  - whether `compare` and `search_commentary` succeeded and whether an answer was submitted;
+  - grounding issue codes.
+
+  `format_case` prints them with tokens, cost and latency. No arguments, error messages, payloads or configuration are included.
+- **Exit code:** `live_agent eval` exits 1 if any selected case fails a check. The full report is still printed and written.
+
+Example (mocked provider):
+
+```
+FAIL apple-fy2026-revenue: agent drafted, answer partial (expected complete)
+    tools (1 call, 2 turns): compare ok
+    reached: compare yes, search_commentary no, submit_answer yes
+    ended: drafted
+    grounding issues: none
+    2 requests, 200 prompt + 40 completion tokens, cost not estimated, 0.0 s
+    check failed: status: ('drafted', 'partial'), expected ('drafted', 'complete')
+    check failed: citation_provenance: []
+```
+
+**B2.3 (attribution, offline):** the second smoke run (6 requests, ~$0.019) gave Apple `complete` and JPMorgan `partial`, solely because the model attributed a quotation from a sectionless 10-Q passage to management (`attribution_unsupported`). The prompt now has a fifth step: use "management" only when the passage's returned section is "Item 7" (10-K) or "Part I, Item 2" (10-Q), otherwise "filing"; never for a null section; never inferred from the company, filing type or wording. The grounding rule is unchanged.
+
+**Still open:** whether the prompt and two extra turns are enough for GPT-5.4 mini is untested until a live rerun is authorized. A model may still skip commentary, which the labels report as a failure.
 
 ### 3.3 Later milestone: ingestion
 

@@ -51,7 +51,7 @@ def no_network(monkeypatch):
 
     monkeypatch.setattr(socket, "create_connection", refuse)
     monkeypatch.setattr(socket.socket, "connect", refuse)
-    for name in ("LLM_API_KEY", "LLM_MODEL", "LLM_BASE_URL"):
+    for name in ("LLM_API_KEY", "OPENAI_API_KEY", "LLM_MODEL", "LLM_BASE_URL"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -271,12 +271,20 @@ def test_missing_credentials_are_named_without_values(monkeypatch):
     with pytest.raises(ProviderConfigError) as error:
         load_provider_settings(_env_file=None)
     assert str(error.value) == (
-        "LLM provider configuration: LLM_API_KEY (missing), LLM_MODEL (missing)"
+        "LLM provider configuration: LLM_API_KEY (or OPENAI_API_KEY) (missing), LLM_MODEL (missing)"
     )
     monkeypatch.setenv("LLM_API_KEY", KEY)  # a key but no model: the key is still not echoed
     with pytest.raises(ProviderConfigError) as error:
         load_provider_settings(_env_file=None)
     assert KEY not in str(error.value) and "LLM_MODEL (missing)" in str(error.value)
+
+
+def test_openai_api_key_is_accepted_and_llm_api_key_wins(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", KEY)
+    monkeypatch.setenv("LLM_MODEL", "m")
+    assert load_provider_settings(_env_file=None).api_key.get_secret_value() == KEY
+    monkeypatch.setenv("LLM_API_KEY", "sk-other")
+    assert load_provider_settings(_env_file=None).api_key.get_secret_value() == "sk-other"
 
 
 @pytest.mark.parametrize("url", ["http://api.example.com/v1", "ftp://x", "file:///etc"])
@@ -340,7 +348,7 @@ def test_a_mocked_provider_run_is_grounded_and_rendered_by_the_server():
         run = run_agent("How much did Apple's revenue grow in fiscal 2026?", model, data=DATA,
                         cache_dir=CACHE)  # fmt: skip
     answer = ground(run, data=DATA, cache_dir=CACHE)
-    assert run.status == "drafted" and len(provider.requests) == MAX_MODEL_TURNS
+    assert run.status == "drafted" and len(provider.requests) == 4
     assert [r.call.id for r in run.tool_results] == ["call_1", "call_2", "call_3"]
     assert answer.status == "complete" and answer.issues == []
     assert answer.current.formatted == "$478,834,000,000" and answer.percent.display == "+15.1%"
@@ -375,7 +383,7 @@ def test_invalid_tool_calls_are_returned_to_the_provider_as_errors():
     ("steps", "status", "requests"),
     [
         ([completion([tool_call(f"c{i}", "resolve_company", {"identifier": "AAPL"})])
-          for i in range(9)], "turn_limit", 4),
+          for i in range(9)], "turn_limit", MAX_MODEL_TURNS),
         ([completion([tool_call(f"c{i}", "resolve_company", {"identifier": "AAPL"})
                       for i in range(7)])], "tool_call_limit", 1),
         ([completion(content="prose, not a draft"), completion(content="still prose")],
@@ -406,7 +414,7 @@ def test_the_cli_stops_without_credentials(no_env_file, capsys):
     provider = FakeProvider([])
     assert live_agent.main(["ask", "q"], transport=httpx.MockTransport(provider)) == 2
     err = capsys.readouterr().err
-    assert "LLM_API_KEY (missing)" in err and "no request was sent" in err
+    assert "LLM_API_KEY (or OPENAI_API_KEY) (missing)" in err and "no request was sent" in err
     assert provider.requests == []
 
 
@@ -438,8 +446,8 @@ def test_the_live_evaluation_reports_denominators(no_env_file, monkeypatch, caps
     output = tmp_path / "live.json"
     code = live_agent.main(["eval", "--output", str(output)],
                            transport=httpx.MockTransport(provider))  # fmt: skip
-    report = json.loads(output.read_text())
-    assert code == 0 and report["attempted"] == 2
+    report = json.loads(output.read_text())  # written even though a case failed
+    assert code == 1 and report["attempted"] == 2
     metrics = report["metrics"]
     assert metrics["draft_success"] == [2, 2] and metrics["grounding_pass"] == [1, 2]
     assert metrics["financial_correct"] == [1, 2] and metrics["valid_tool_sequence"] == [2, 2]
@@ -456,3 +464,86 @@ def test_the_live_evaluation_defaults_to_smoke_cases_and_needs_all_for_more():
     assert len(everything) == 19 and "fabricated-quote" not in {c.id for c in everything}
     with pytest.raises(ValueError, match="not live-eligible"):
         live_agent.live_cases(cases, ["fabricated-quote"], False)
+
+
+def skipping_provider() -> FakeProvider:
+    """Apple: compare, then answer without searching. JPMorgan: an unknown tool and a bad
+    argument, then a draft citing nothing and an invented value id."""
+
+    def apple_answer(body):
+        cid = tool_output(body, "a1")["output"]["comparison_id"]
+        values = [{"placeholder": "x", "value_id": f"{cid}/delta"}]
+        draft = {"subject": cid, "answer": "Up {x}.", "values": values}
+        return completion([tool_call("a2", ANSWER_TOOL, draft)])
+
+    def jpm_answer(body):
+        cid = tool_output(body, "j3")["output"]["comparison_id"]
+        invented = [{"placeholder": "x", "value_id": "obs:" + "b" * 64}]
+        draft = {"subject": cid, "answer": "Was {x}.", "values": invented}
+        return completion([tool_call("j4", ANSWER_TOOL, draft)])
+
+    q3 = {"kind": "fiscal_quarter", "quarter": 3}
+    jpm_compare = {"cik": "0000019617", "metric": "net_income",
+                   "current_period": q3 | {"fiscal_year": 2026},
+                   "prior_period": q3 | {"fiscal_year": 2025}}  # fmt: skip
+    return FakeProvider([
+        completion([tool_call("a1", "compare", {
+            "cik": APPLE, "metric": "revenue",
+            "current_period": {"kind": "fiscal_year", "fiscal_year": 2026},
+            "prior_period": {"kind": "fiscal_year", "fiscal_year": 2025}})]),
+        apple_answer,
+        completion([tool_call("j1", "read_file", {"path": "/etc/passwd"}),
+                    tool_call("j2", "compare", "{not json")]),
+        completion([tool_call("j3", "compare", jpm_compare)]),
+        jpm_answer,
+    ])  # fmt: skip
+
+
+@pinned
+def test_failed_cases_exit_nonzero_with_safe_diagnostics(no_env_file, monkeypatch, capsys,
+                                                         tmp_path):  # fmt: skip
+    monkeypatch.setenv("LLM_API_KEY", KEY)
+    monkeypatch.setenv("LLM_MODEL", "test-model")
+    output = tmp_path / "live.json"
+    code = live_agent.main(["eval", "--output", str(output)],
+                           transport=httpx.MockTransport(skipping_provider()))  # fmt: skip
+    captured = capsys.readouterr()
+    assert code == 1
+    apple, jpm = json.loads(output.read_text())["results"]
+
+    # Apple skipped commentary although the case expects complete: correct figures, partial.
+    d = apple["diagnostics"]
+    assert [s["name"] for s in d["tools"]] == ["compare"] and d["model_turns"] == 2
+    assert d["reached"] == {"compare": True, "search_commentary": False, "submit_answer": True}
+    assert d["terminal_reason"] == "drafted" and apple["status"] == "partial"
+    assert apple["checks"]["numeric"] and not apple["checks"]["status"]
+    assert not apple["checks"]["citation_provenance"]
+
+    # JPMorgan: tool errors, a correction, then a draft the validator rejects.
+    d = jpm["diagnostics"]
+    assert [(s["name"], s["ok"], s["error_code"]) for s in d["tools"]] == [
+        ("read_file", False, "unknown_tool"), ("compare", False, "invalid_arguments"),
+        ("compare", True, None),
+    ]  # fmt: skip
+    assert d["tool_counts"] == {"read_file": 1, "compare": 2}
+    assert d["issue_codes"] == ["value_not_in_run"] and jpm["status"] == "abstained"
+    assert jpm["valid_tool_sequence"] is False
+
+    out = captured.out
+    assert "FAIL apple-fy2026-revenue" in out and "FAIL jpm-q3-2026-net-income" in out
+    assert "search_commentary no" in out
+    assert "read_file unknown_tool > compare invalid_arguments > compare ok" in out
+    assert "grounding issues: value_not_in_run" in out
+    # Codes and names only: no key, header, arguments or payloads.
+    everything = out + captured.err + output.read_text()
+    for secret in (KEY, "Bearer", "/etc/passwd", "{not json", "Was {x}"):
+        assert secret not in everything
+
+
+@pinned
+def test_a_passing_evaluation_exits_zero(no_env_file, monkeypatch, tmp_path):
+    monkeypatch.setenv("LLM_API_KEY", KEY)
+    monkeypatch.setenv("LLM_MODEL", "test-model")
+    code = live_agent.main(["eval", "--cases", "apple-fy2026-revenue"],
+                           transport=httpx.MockTransport(apple_provider()))  # fmt: skip
+    assert code == 0
