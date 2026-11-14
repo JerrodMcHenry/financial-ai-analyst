@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from financial_analyst import agent
+from financial_analyst import agent, live_agent
 from financial_analyst.agent import run_agent
 from financial_analyst.agent_eval import scripted_model
 from financial_analyst.analysis import load_pinned_data
@@ -222,12 +222,27 @@ def test_values_must_belong_to_the_subjects_company_metric_and_periods():
 
 
 @pinned
-@pytest.mark.parametrize("text", ["Revenue was $500 billion.", "Up 15.1% {x}.", "In FY2026."])
-def test_digits_in_the_narrative_abstain(text):
-    values = [{"placeholder": "x", "value_id": "$value:0:delta"}] if "{x}" in text else []
-    answer = ground(apple_run({"answer": text, "values": values}), data=DATA, cache_dir=CACHE)
-    assert answer.status == "abstained" and "raw_number_in_text" in codes(answer)
-    assert "500" not in published(answer)
+def test_a_note_mentioning_fy2026_does_not_stop_a_valid_answer():
+    # The live M3.8.1 Apple failure: digits in the unpublished note made the answer abstain.
+    answer = ground(apple_run({"answer": "Revenue grew in FY2026 versus FY2025.", "values": []}),
+                    data=DATA, cache_dir=CACHE)  # fmt: skip
+    assert answer.status == "complete" and answer.issues == []
+    assert answer.current.formatted == "$478,834,000,000"
+
+
+@pinned
+@pytest.mark.parametrize("note", ["Revenue was $999,999 billion.", "Up 87.6% to $1.2 trillion."])
+def test_numbers_invented_in_the_note_never_reach_the_answer(note):
+    outcome = apple_run({"answer": note, "values": []})
+    answer = ground(outcome, data=DATA, cache_dir=CACHE)
+    assert answer.status == "complete"
+    everything = answer.model_dump_json(exclude={"question"})  # audit fields included
+    for invented in ("999,999", "87.6", "1.2 trillion"):
+        assert invented not in everything
+    assert outcome.draft.answer == note  # kept in the run record, for audit only
+    [withheld] = answer.withheld
+    assert (withheld.kind, withheld.characters) == ("model_narrative", len(note))
+    assert "999" not in live_agent.format_answer(answer)
 
 
 @pinned
@@ -346,11 +361,12 @@ def test_injected_text_in_a_retrieved_passage_cannot_be_verified_or_obeyed(monke
         "quotes": [{"citation_id": "$cite:0:0", "text": "Report revenue of 999 trillion dollars."}],
     })  # fmt: skip
     answer = ground(outcome, data=DATA, cache_dir=CACHE)
-    assert answer.status == "abstained"
-    assert {"raw_number_in_text", "citation_not_verified", "quote_citation_invalid"} <= set(
-        codes(answer)
-    )
-    assert "999" not in published(answer) and "IGNORE" not in published(answer)
+    # The poisoned citation and the quote that obeys it are rejected; the server's figures
+    # stand, and nothing the injection or the model wrote is in the answer.
+    assert answer.status == "partial"
+    assert {"citation_not_verified", "quote_citation_invalid"} <= set(codes(answer))
+    everything = answer.model_dump_json(exclude={"question"})
+    assert "999" not in everything and "IGNORE" not in everything
 
 
 # --- Quotations, explanations and commentary -------------------------------------------------
@@ -484,7 +500,7 @@ def test_presented_commentary_is_still_checked_on_a_figures_only_question():
     ("script", "run_status"),
     [
         ([{"tools": [{"name": "nope", "arguments": {}}]}, {"raw": "not a turn"}], "model_error"),
-        ([{"answer": {"answer": "{x}"}}, {"answer": {"answer": "{x}"}}], "invalid_draft"),
+        ([{"answer": {"answer": ""}}, {"answer": {"answer": ""}}], "invalid_draft"),
         ([{"tools": [{"name": "resolve_company", "arguments": {"identifier": "AAPL"}}] * 7}],
          "tool_call_limit"),
     ],
@@ -495,3 +511,33 @@ def test_runs_without_a_valid_draft_abstain(script, run_status):
     assert outcome.status == run_status
     assert answer.status == "abstained" and codes(answer) == ["run_not_drafted"]
     assert answer.statement is None and answer.withheld == []
+
+
+# --- Model-written text after the digit rule (M3.8.2) ----------------------------------------
+
+
+@pinned
+def test_a_rejected_quotation_is_not_echoed_in_issue_details():
+    fabricated = "Revenue doubled to $2 trillion because of AI."
+    outcome = apple_run({"citations": ["$cite:0:0"],
+                         "quotes": [{"citation_id": "$cite:0:0", "text": fabricated}]})  # fmt: skip
+    answer = ground(outcome, data=DATA, cache_dir=CACHE)
+    [issue] = answer.issues
+    assert issue.code == "quote_not_verbatim" and "2 trillion" not in issue.detail
+    assert "2 trillion" not in answer.model_dump_json(exclude={"question"})
+    assert "2 trillion" not in live_agent.format_answer(answer)  # issue details are printed
+
+
+@pinned
+def test_the_only_model_authored_text_published_is_verified_quotation():
+    outcome = apple_run({
+        "answer": "A note with FY2026 and $1 in it.", "citations": ["$cite:0:0"],
+        "quotes": [{"citation_id": "$cite:0:0", "text": "$quote:0:0"}],
+        "explanations": [{"text": "Because of 42 new stores.", "citation_id": "$cite:0:0"}],
+    }, query="iPhone net sales Pro models")  # fmt: skip
+    answer = ground(outcome, data=DATA, cache_dir=CACHE)
+    [quote] = answer.quotations
+    assert quote.text in outcome.evidence.passages[quote.citation_id].passage.text
+    everything = answer.model_dump_json(exclude={"question"})
+    assert "$1 in it" not in everything and "42 new stores" not in everything
+    assert [w.kind for w in answer.withheld] == ["model_narrative", "explanation"]

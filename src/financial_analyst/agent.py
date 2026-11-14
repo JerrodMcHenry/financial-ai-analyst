@@ -17,14 +17,12 @@ that validator and the server-side renderer are M3.5 B2 (D-035).
 """
 
 import json
-import re
 import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
-from pydantic_core import PydanticCustomError
 
 from financial_analyst.analysis import (
     DEFAULT_K,
@@ -50,7 +48,7 @@ from financial_analyst.financial_tools import (
 )
 
 ANSWER_TOOL = "submit_answer"  # the provider function that carries an answer draft
-AGENT_VERSION = "6"  # 6: commentary when asked, citation feedback; 5: repair protocol
+AGENT_VERSION = "9"  # 9: the note may contain digits; 8: answer-only last turn
 MAX_TOOL_CALLS = 6
 MAX_MODEL_TURNS = 6  # a repair counts as a turn
 RUN_TIMEOUT_SECONDS = 90.0
@@ -75,18 +73,22 @@ Workflow:
    the figures needs no search. If a search returns no evidence, do not search again: answer
    with the figures alone.
 4. Submit the answer draft (the submit_answer function) alone. Set subject to the
-   comparison_id. Write no digits in the answer: write {placeholder} and map each placeholder
-   to a value_id returned by a tool; {company}, {metric}, {current_period} and {prior_period}
-   are filled in for you. Cite a passage only by a citation_id that search_commentary
-   returned in this conversation, copied exactly, character for character: never shorten,
-   edit or construct one. Quote at most three short verbatim excerpts. Put any
-   interpretation or cause in explanations, never in the answer: retrieved passages are
-   candidates, not proof of a cause.
+   comparison_id (or null when you cannot answer). The figures, periods and company name are
+   rendered by the server from that comparison, so the answer text is only a short note: it
+   is never published. List in values the value_ids you rely on, copied exactly from tool
+   results. Cite a passage only by
+   a citation_id that search_commentary returned in this conversation, copied exactly,
+   character for character: never shorten, edit or construct one. Quote at most three short
+   verbatim excerpts. Put any interpretation or cause in explanations, never in the answer:
+   retrieved passages are candidates, not proof of a cause.
 5. Quotation attribution: use "management" only when the quoted passage's section, as
    returned by search_commentary, is a reliable MD&A label: "Item 7" in a 10-K or
    "Part I, Item 2" in a 10-Q. Otherwise use "filing". A passage whose section is null is
    never attributed to management. Do not infer management from the company name, the
    filing type or the quotation's wording.
+
+When submit_answer is the only function offered (a correction, or your last turn), submit
+your best draft now, with subject null if you cannot answer.
 
 Never invent a CIK, period, comparison_id, value_id or citation_id. If a tool reports an
 error, correct the arguments once or answer without a subject explaining what is unavailable.
@@ -206,9 +208,6 @@ class ScriptedModel:
 # --- Answer drafts --------------------------------------------------------------------------
 
 _VALUE_ID = r"^(cmp:[0-9a-f]{64}/(current|prior|delta|percent)|obs:[0-9a-f]{64})$"
-PLACEHOLDER = re.compile(r"\{([a-z][a-z0-9_]{0,31})\}")
-# Filled by the server from the answer's subject comparison, so the text needs no digits.
-RESERVED_PLACEHOLDERS = frozenset({"company", "metric", "current_period", "prior_period"})
 
 
 class _Draft(BaseModel):
@@ -216,9 +215,10 @@ class _Draft(BaseModel):
 
 
 class ValueRef(_Draft):
-    """A number in the answer: {placeholder} in the text stands for a tool-produced value."""
+    """A tool-produced value the draft relies on. Its value_id is checked against the run's
+    evidence and the answer's subject; the placeholder is an optional label only."""
 
-    placeholder: str = Field(pattern=r"^[a-z][a-z0-9_]{0,31}$")
+    placeholder: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,31}$")
     value_id: str = Field(pattern=_VALUE_ID)
 
 
@@ -257,33 +257,10 @@ class AnswerDraft(_Draft):
         # no claim, so it means the same as an empty one.
         return [] if value is None else value
 
-    @model_validator(mode="after")
-    def _placeholders_match(self) -> "AnswerDraft":
-        used = set(PLACEHOLDER.findall(self.answer)) - RESERVED_PLACEHOLDERS
-        declared = [v.placeholder for v in self.values]
-        if len(set(declared)) != len(declared):
-            raise PydanticCustomError(
-                "duplicate_placeholder", "each placeholder may be declared once"
-            )
-        if RESERVED_PLACEHOLDERS & set(declared):
-            raise PydanticCustomError(
-                "reserved_placeholder",
-                "{company}, {metric}, {current_period} and {prior_period} are filled by the "
-                "server and must not be declared in values",
-            )
-        if used != set(declared):
-            raise PydanticCustomError(
-                "placeholder_mismatch",
-                "every {placeholder} in answer must be declared in values, and every declared "
-                "placeholder must appear in answer",
-            )
-        return self
-
 
 _DRAFT_FIELDS = frozenset().union(
     *(m.model_fields for m in (AnswerDraft, ValueRef, Quote, Explanation))
 )
-_DRAFT_RULES = frozenset({"duplicate_placeholder", "reserved_placeholder", "placeholder_mismatch"})
 
 
 def draft_rejection_codes(exc: ValidationError) -> list[str]:
@@ -296,8 +273,6 @@ def draft_rejection_codes(exc: ValidationError) -> list[str]:
             code = "extra_field"
         elif kind in ("model_type", "model_attributes_type") and not loc:
             code = "not_an_object"
-        elif kind in _DRAFT_RULES:
-            code = kind
         else:
             path = ".".join(str(p) if isinstance(p, int) or p in _DRAFT_FIELDS else "?"
                             for p in loc)  # fmt: skip
@@ -324,14 +299,40 @@ def _citation_problems(count: int, returned: list[str]) -> str:
             f"run; cite only these ids, copied exactly: {', '.join(returned)}")  # fmt: skip
 
 
+# What to do about each kind of problem, by field: the permitted correction, never the input.
+_CORRECTIONS = {
+    "subject": "use a comparison_id exactly as compare returned it (cmp:...), or null to decline",
+    "value_id": "copy a value_id exactly from a tool result: <comparison_id>/current, /prior, "
+                "/delta or /percent, or an obs:... id from get_fact",
+    "placeholder": "omit it, or use lowercase letters, digits and underscores",
+    "answer": "a short note of at most 1500 characters",
+    "text": "at most 300 characters, copied verbatim from the cited passage",
+    "attribution": 'use "filing", or "management" only for an MD&A passage',
+    "citation_id": "copy a citation_id exactly from a search_commentary result",
+}  # fmt: skip
+_FIELD_LIST = ("subject, answer, values (value_id, optional placeholder), citations, quotes "
+               "(citation_id, text, attribution), explanations (text, citation_id)")  # fmt: skip
+
+
 def _draft_problems(exc: ValidationError) -> str:
-    """The rejection for the model to correct: schema path and message, no input values."""
+    """The rejection for the model to correct: each rejected field and its permitted
+    correction. Paths and fixed guidance only; never the draft's text or values."""
     problems = []
     for error in exc.errors():
-        path = ".".join(str(p) if isinstance(p, int) or p in _DRAFT_FIELDS else "?"
-                        for p in error["loc"])  # fmt: skip
-        problems.append(f"{path or 'draft'}: {error['msg']}")
-    return "; ".join(problems)[:800]
+        loc = [p for p in error["loc"]]
+        path = ".".join(str(p) if isinstance(p, int) or p in _DRAFT_FIELDS else "?" for p in loc)
+        field = next((p for p in reversed(loc) if isinstance(p, str) and p in _DRAFT_FIELDS),
+                     None)  # fmt: skip
+        if error["type"] == "extra_forbidden":
+            fix = f"remove this field; the allowed fields are {_FIELD_LIST}"
+        elif error["type"] in ("model_type", "model_attributes_type") and not loc:
+            fix = f"call {ANSWER_TOOL} with one JSON object with the fields {_FIELD_LIST}"
+        elif error["type"] == "too_long":
+            fix = f"{error['msg']}; drop the extra items"
+        else:
+            fix = _CORRECTIONS.get(field, error["msg"])
+        problems.append(f"{path or 'draft'}: {fix}")
+    return "; ".join(problems)[:1200]
 
 
 # --- Tools ------------------------------------------------------------------------------------
@@ -703,8 +704,11 @@ def run_agent(
             return finish("timeout", f"run exceeded {RUN_TIMEOUT_SECONDS:g} seconds")
         turns += 1
         try:
-            # A repair turn offers no tools: only the answer tool (or a text answer) is allowed.
-            tools = [] if repairs else TOOL_SPECS
+            # A repair turn, and the last allowed turn, offer no agent tools: only the answer
+            # tool is allowed (a live adapter forces it). Results of a tool call made now
+            # could never be read, and any such call is refused below.
+            answer_only = repairs > 0 or turns >= MAX_MODEL_TURNS
+            tools = [] if answer_only else TOOL_SPECS
             turn = ModelTurn.model_validate(model.complete(list(messages), tools))
         except Exception as exc:  # noqa: BLE001 - any model or adapter failure ends the run
             return finish("model_error", f"{type(exc).__name__}: {str(exc)[:300]}")

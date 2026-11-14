@@ -182,7 +182,6 @@ def test_answers_arrive_as_the_answer_tool_or_as_content(body, answer):
         {},
         {"choices": []},
         {"choices": [{"message": "text"}]},
-        completion(content=""),
         completion(content="cut", finish="length"),
         completion([{"id": "c", "type": "code", "function": {"name": "x", "arguments": "{}"}}]),
         completion([{"id": "c", "type": "function"}]),
@@ -210,7 +209,7 @@ def test_a_request_carries_the_key_only_in_the_authorization_header():
     assert request.headers["authorization"] == f"Bearer {KEY}"
     body = provider.bodies[0]
     assert body["model"] == "test-model" and body["temperature"] == 0.0
-    assert body["tool_choice"] == "auto" and KEY not in request.content.decode()
+    assert body["tool_choice"] == "required" and KEY not in request.content.decode()
     assert len(body["tools"]) == len(TOOL_SPECS) + 1
 
 
@@ -576,8 +575,10 @@ def run_with(provider: FakeProvider, question: str = APPLE_Q):
 
 @pinned
 def test_a_rejected_draft_is_repaired_through_submit_answer():
-    def bad(body):  # declares {delta} but writes {change}: the placeholder rule fails
-        return completion([tool_call("a1", ANSWER_TOOL, apple_draft(body, answer="Up {change}."))])
+    def bad(body):  # a typed number where a value_id belongs
+        return completion(
+            [tool_call("a1", ANSWER_TOOL, apple_draft(body, values=[{"value_id": "62673000000"}]))]
+        )
 
     def repaired(body):
         # The repair request: the rejected call replayed under its id, answered with codes,
@@ -588,7 +589,14 @@ def test_a_rejected_draft_is_repaired_through_submit_answer():
         assert call["role"] == "assistant" and call["tool_calls"][0]["id"] == "a1"
         assert call["tool_calls"][0]["function"]["name"] == ANSWER_TOOL
         result = tool_output(body, "a1")
-        assert result["ok"] is False and result["error"]["codes"] == ["placeholder_mismatch"]
+        assert result["ok"] is False
+        assert result["error"]["codes"] == ["string_pattern_mismatch:values.0.value_id"]
+        # The rejected field and its permitted correction; never the rejected value.
+        assert (
+            "values.0.value_id: copy a value_id exactly from a tool result"
+            in (result["error"]["message"])
+        )
+        assert "62673000000" not in result["error"]["message"]
         assert "submit_answer" in result["error"]["message"]
         assert "No other tool may be called" in result["error"]["message"]
         return completion([tool_call("a2", ANSWER_TOOL, apple_draft(body))])
@@ -596,26 +604,31 @@ def test_a_rejected_draft_is_repaired_through_submit_answer():
     provider = compare_then(bad, repaired)
     run = run_with(provider)
     assert run.status == "drafted" and run.repair_attempted and len(provider.requests) == 3
-    assert run.draft_rejections == [["placeholder_mismatch"]]
+    assert run.draft_rejections == [["string_pattern_mismatch:values.0.value_id"]]
     assert ground(run, data=DATA, cache_dir=CACHE).status == "complete"  # figures-only question
 
 
 @pinned
 def test_an_empty_repair_response_ends_the_run_with_its_finish_reason():
     def bad(body):
-        return completion([tool_call("a1", ANSWER_TOOL, apple_draft(body, answer="Up {x}."))])
+        return completion(
+            [tool_call("a1", ANSWER_TOOL, apple_draft(body, values=[{"value_id": "62673000000"}]))]
+        )
 
     provider = compare_then(bad, completion(content=None))  # neither calls nor content
     run = run_with(provider)
     assert run.status == "model_error" and len(provider.requests) == 3
-    assert "neither tool calls nor content (finish_reason=stop)" in run.error
-    assert run.draft_rejections == [["placeholder_mismatch"]]
+    assert "empty_response: no tool call and no text (content=null" in run.error
+    assert "finish_reason=stop" in run.error
+    assert run.draft_rejections == [["string_pattern_mismatch:values.0.value_id"]]
 
 
 @pinned
 def test_a_repair_turn_cannot_call_financial_tools():
     def bad(body):
-        return completion([tool_call("a1", ANSWER_TOOL, apple_draft(body, answer="Up {x}."))])
+        return completion(
+            [tool_call("a1", ANSWER_TOOL, apple_draft(body, values=[{"value_id": "62673000000"}]))]
+        )
 
     provider = compare_then(bad, completion([tool_call("c2", "compare", APPLE_COMPARE)]))
     run = run_with(provider)
@@ -626,10 +639,8 @@ def test_a_repair_turn_cannot_call_financial_tools():
 @pytest.mark.parametrize(
     ("change", "codes"),
     [
-        ({"answer": "Up {x}."}, ["placeholder_mismatch"]),
-        ({"values": [{"placeholder": "company", "value_id": "obs:" + "0" * 64}]},
-         ["reserved_placeholder"]),
         ({"confidence": 0.9}, ["extra_field"]),
+        ({"answer": ""}, ["string_too_short:answer"]),
         ({"quotes": [{"citation_id": "c", "text": "y" * 301}]}, ["string_too_long:quotes.0.text"]),
         ({"values": [{"placeholder": "delta", "value_id": "62673000000"}]},
          ["string_pattern_mismatch:values.0.value_id"]),
@@ -662,11 +673,11 @@ def test_prose_and_null_lists():
 def test_an_invalid_draft_on_the_last_turn_is_not_repaired():
     lookups = [completion([tool_call(f"r{i}", "resolve_company", {"identifier": "AAPL"})])
                for i in range(5)]  # fmt: skip
-    provider = FakeProvider([*lookups, completion([tool_call("a", ANSWER_TOOL, {"answer": "{x}"})]),
+    provider = FakeProvider([*lookups, completion([tool_call("a", ANSWER_TOOL, {"answer": ""})]),
                              completion(content="never requested")])  # fmt: skip
     run = run_with(provider)
     assert run.status == "invalid_draft" and len(provider.requests) == MAX_MODEL_TURNS
-    assert run.draft_rejections == [["placeholder_mismatch"]] and not run.repair_attempted
+    assert run.draft_rejections == [["string_too_short:answer"]] and not run.repair_attempted
 
 
 @pinned
@@ -676,7 +687,8 @@ def test_repair_diagnostics_carry_codes_only(no_env_file, monkeypatch, capsys, t
     secret_text = "Revenue rose because of a confidential reason {change}."
 
     def bad(body):
-        return completion([tool_call("a1", ANSWER_TOOL, apple_draft(body, answer=secret_text))])
+        draft = apple_draft(body, answer=secret_text, values=[{"value_id": "confidential-9"}])
+        return completion([tool_call("a1", ANSWER_TOOL, draft)])
 
     output = tmp_path / "live.json"
     provider = compare_then(bad, completion(content=None))
@@ -684,10 +696,10 @@ def test_repair_diagnostics_carry_codes_only(no_env_file, monkeypatch, capsys, t
                            transport=httpx.MockTransport(provider))  # fmt: skip
     captured = capsys.readouterr()
     assert code == 1
-    assert "draft rejected: placeholder_mismatch" in captured.out
-    assert "finish_reason=stop" in captured.out
+    assert "draft rejected: string_pattern_mismatch:values.0.value_id" in captured.out
+    assert "provider error empty_response: content=null" in captured.out
     everything = captured.out + captured.err + output.read_text()
-    for leaked in (KEY, "Bearer", "confidential reason", "{change}"):
+    for leaked in (KEY, "Bearer", "confidential reason", "{change}", "confidential-9"):
         assert leaked not in everything
 
 
@@ -716,3 +728,250 @@ def test_an_unreturned_citation_is_answered_as_the_submit_answer_result():
                    question="Why did Apple's revenue grow in fiscal 2026?")  # fmt: skip
     assert run.status == "drafted" and run.draft_rejections == [["citation_not_returned"]]
     assert ground(run, data=DATA, cache_dir=CACHE).status == "complete"
+
+
+# --- Response shapes, usage accounting and the simplified draft (M3.8) ------------------------
+
+
+def message_body(message: dict, finish="stop", usage=(100, 20)) -> dict:
+    body = {"choices": [{"message": {"role": "assistant"} | message, "finish_reason": finish}]}
+    if usage:
+        body["usage"] = {"prompt_tokens": usage[0], "completion_tokens": usage[1]}
+    return body
+
+
+SECRET = "confidential provider text 4242"
+
+
+@pytest.mark.parametrize(
+    ("message", "kind", "summary"),
+    [
+        ({"content": None}, "empty_response", "content=null, tool_calls=0"),
+        ({"content": ""}, "empty_response", "content=empty_string"),
+        ({}, "empty_response", "content=absent"),
+        ({"content": [{"type": "reasoning", "summary": SECRET}]}, "empty_response",
+         "content=parts [reasoning]"),
+        ({"content": [{"type": "text", "text": "   "}]}, "empty_response", "content=parts [text]"),
+        ({"content": None, "refusal": SECRET}, "refusal", "refusal=yes"),
+        ({"content": None, "tool_calls": []}, "empty_response", "keys=[content, role, tool_calls]"),
+    ],
+)  # fmt: skip
+def test_empty_and_refused_responses_are_named_by_shape_without_content(message, kind, summary):
+    with pytest.raises(ProviderError) as error:
+        parse_response(message_body(message))
+    assert error.value.kind == kind and summary in str(error.value)
+    assert "finish_reason=stop" in str(error.value) and SECRET not in str(error.value)
+
+
+def test_structured_text_parts_are_read_as_content():
+    parts = [{"type": "text", "text": '{"answer": '}, {"type": "reasoning", "summary": SECRET},
+             {"type": "output_text", "text": '"From parts."}'}]  # fmt: skip
+    assert parse_response(message_body({"content": parts})).answer == {"answer": "From parts."}
+
+
+def test_a_tool_call_without_a_type_is_read_as_a_function_call():
+    call = {"id": "c1", "function": {"name": "compare", "arguments": "{}"}}
+    turn = parse_response(message_body({"content": None, "tool_calls": [call]}))
+    assert [(c.id, c.name) for c in turn.tool_calls] == [("c1", "compare")]
+
+
+def test_a_content_filter_stop_is_its_own_error():
+    with pytest.raises(ProviderError) as error:
+        parse_response(message_body({"content": "partial"}, finish="content_filter"))
+    assert error.value.kind == "content_filter"
+
+
+def test_usage_is_kept_when_the_response_is_unusable():
+    provider = FakeProvider([message_body({"content": None}, usage=(1500, 7))])
+    with model_for(provider, input_cost_per_mtok=Decimal("1"),
+                   output_cost_per_mtok=Decimal("1")) as model:  # fmt: skip
+        with pytest.raises(ProviderError):
+            model.complete([], TOOL_SPECS)
+    [call] = model.calls
+    assert (call.outcome, call.error_kind) == ("error", "empty_response")
+    assert (call.prompt_tokens, call.completion_tokens) == (1500, 7)
+    assert call.shape.content_type == "null" and call.shape.usage_available
+    usage = model.usage()
+    assert usage.usage_complete and usage.prompt_tokens == 1500
+    assert usage.estimated_cost_usd == Decimal("0.001507")
+
+
+def test_missing_usage_is_reported_not_counted_as_zero():
+    provider = FakeProvider([message_body({"content": '{"answer": "x"}'}, usage=None),
+                             completion(content='{"answer": "y"}', usage=(100, 10)),
+                             httpx.ReadTimeout("slow")])  # fmt: skip
+    with model_for(provider, input_cost_per_mtok=Decimal("1"),
+                   output_cost_per_mtok=Decimal("1")) as model:  # fmt: skip
+        model.complete([], TOOL_SPECS)
+        model.complete([], TOOL_SPECS)
+        with pytest.raises(ProviderError):
+            model.complete([], TOOL_SPECS)
+    usage = model.usage()
+    assert (usage.requests, usage.requests_without_usage) == (3, 2)
+    assert not usage.usage_complete and usage.prompt_tokens == 100
+    assert "3 requests (2 without usage: their tokens are unknown)" in live_agent.format_usage(
+        usage
+    )
+    assert "at least ~$0.0001" in live_agent.format_usage(usage)
+
+
+@pinned
+def test_a_draft_without_placeholder_syntax_is_accepted_and_still_grounded():
+    def answer(body):  # reserved names declared, placeholders unused: no longer an error
+        cid = tool_output(body, "c1")["output"]["comparison_id"]
+        draft = {"subject": cid, "answer": "Revenue rose in {current_period}.",
+                 "values": [{"placeholder": "company", "value_id": f"{cid}/delta"},
+                            {"value_id": f"{cid}/percent"}]}  # fmt: skip
+        return completion([tool_call("a1", ANSWER_TOOL, draft)])
+
+    run = run_with(compare_then(answer))
+    assert run.status == "drafted" and run.draft_rejections == []
+    answer_ = ground(run, data=DATA, cache_dir=CACHE)
+    assert answer_.status == "complete" and answer_.current.formatted == "$478,834,000,000"
+
+
+@pinned
+@pytest.mark.parametrize(
+    ("change", "code"),
+    [
+        ({"values": [{"value_id": "obs:" + "a" * 64}]}, "value_not_in_run"),
+        ({"values": [{"value_id": "cmp:" + "b" * 64 + "/delta"}]}, "value_not_in_run"),
+    ],
+)
+def test_the_grounding_protections_are_unchanged(change, code):
+    def answer(body):
+        return completion([tool_call("a1", ANSWER_TOOL, apple_draft(body, **change))])
+
+    answer_ = ground(run_with(compare_then(answer)), data=DATA, cache_dir=CACHE)
+    assert answer_.status == "abstained" and code in [i.code for i in answer_.issues]
+    assert "500" not in answer_.model_dump_json(exclude={"issues", "withheld", "question"})
+
+
+@pinned
+def test_a_second_invalid_draft_fails_safely_after_field_specific_feedback():
+    def bad(body):
+        return completion([tool_call("a1", ANSWER_TOOL, apple_draft(body, subject="apple-fy"))])
+
+    def still_bad(body):
+        message = tool_output(body, "a1")["error"]["message"]
+        assert "subject: use a comparison_id exactly as compare returned it" in message
+        assert "apple-fy" not in message
+        return completion([tool_call("a2", ANSWER_TOOL, apple_draft(body, subject="still-bad"))])
+
+    run = run_with(compare_then(bad, still_bad))
+    assert run.status == "invalid_draft" and run.draft_rejections == [
+        ["string_pattern_mismatch:subject"],
+        ["string_pattern_mismatch:subject"],
+    ]
+    assert ground(run, data=DATA, cache_dir=CACHE).status == "abstained"
+
+
+@pinned
+def test_failed_provider_calls_show_their_shape_in_the_live_report(no_env_file, monkeypatch,
+                                                                    capsys, tmp_path):  # fmt: skip
+    monkeypatch.setenv("LLM_API_KEY", KEY)
+    monkeypatch.setenv("LLM_MODEL", "test-model")
+    empty = message_body({"content": [{"type": "reasoning", "summary": SECRET}]}, usage=(800, 3))
+    output = tmp_path / "live.json"
+    code = live_agent.main(["eval", "--cases", "apple-fy2026-revenue", "--output", str(output)],
+                           transport=httpx.MockTransport(compare_then(empty)))  # fmt: skip
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "provider error empty_response: content=parts [reasoning], tool_calls=0" in out
+    assert "2 requests, 900 prompt + 23 completion tokens" in out  # the failed call counted
+    report = json.loads(output.read_text())
+    assert report["requests"] == 2 and report["requests_without_usage"] == 0
+    assert SECRET not in out + output.read_text()
+
+
+# --- Required function calls (M3.8.1) ---------------------------------------------------------
+
+FORCED = {"type": "function", "function": {"name": ANSWER_TOOL}}
+AGENT_TOOLS = [s.name for s in TOOL_SPECS]
+
+
+def offered(body: dict) -> list[str]:
+    return [t["function"]["name"] for t in body["tools"]]
+
+
+@pinned
+def test_normal_turns_require_a_function_call_from_every_tool():
+    provider = apple_provider()
+    with model_for(provider) as model:
+        run = run_agent(APPLE_Q, model, data=DATA, cache_dir=CACHE)
+    assert run.status == "drafted" and len(provider.requests) == 4
+    for body in provider.bodies:  # four normal turns: none is a repair or the last turn
+        assert body["tool_choice"] == "required"
+        assert offered(body) == AGENT_TOOLS + [ANSWER_TOOL]
+    answer = ground(run, data=DATA, cache_dir=CACHE)
+    assert answer.status == "complete" and answer.current.formatted == "$478,834,000,000"
+
+
+def lookups(count: int) -> list[dict]:
+    return [completion([tool_call(f"r{i}", "resolve_company", {"identifier": "AAPL"})])
+            for i in range(count)]  # fmt: skip
+
+
+@pinned
+def test_the_last_turn_offers_and_forces_only_submit_answer():
+    def last(body):
+        assert offered(body) == [ANSWER_TOOL] and body["tool_choice"] == FORCED
+        return completion([tool_call("c9", "compare", APPLE_COMPARE)])  # ignored the force
+
+    provider = FakeProvider([*lookups(5), last])
+    run = run_with(provider)
+    assert [b["tool_choice"] for b in provider.bodies[:5]] == ["required"] * 5
+    assert run.status == "turn_limit" and len(provider.requests) == 6
+    # The financial tool requested on the last turn never ran.
+    assert [r.call.name for r in run.tool_results] == ["resolve_company"] * 5
+    assert ground(run, data=DATA, cache_dir=CACHE).status == "abstained"
+
+
+@pinned
+def test_an_answer_on_the_forced_last_turn_is_grounded():
+    def compare_first(body):
+        return completion([tool_call("c1", "compare", APPLE_COMPARE)])
+
+    def last(body):
+        assert offered(body) == [ANSWER_TOOL] and body["tool_choice"] == FORCED
+        return completion([tool_call("a1", ANSWER_TOOL, apple_draft(body))])
+
+    provider = FakeProvider([compare_first, *lookups(4), last])
+    run = run_with(provider)
+    assert run.status == "drafted" and run.model_turns == 6 and not run.repair_attempted
+    assert ground(run, data=DATA, cache_dir=CACHE).status == "complete"
+
+
+@pinned
+def test_an_empty_response_despite_required_calling_still_fails_safely():
+    empty = {"choices": [{"message": {"role": "assistant", "content": "", "refusal": None,
+                                      "annotations": []}, "finish_reason": "stop"}],
+             "usage": {"prompt_tokens": 2700, "completion_tokens": 3}}  # fmt: skip
+    provider = compare_then(empty)
+    with model_for(provider, input_cost_per_mtok=Decimal("0.75"),
+                   output_cost_per_mtok=Decimal("4.50")) as model:  # fmt: skip
+        run = run_agent(APPLE_Q, model, data=DATA, cache_dir=CACHE)
+        usage = model.usage()
+    assert provider.bodies[1]["tool_choice"] == "required"
+    assert run.status == "model_error" and "empty_response" in run.error
+    assert "content=empty_string, tool_calls=0, finish_reason=stop" in run.error
+    assert ground(run, data=DATA, cache_dir=CACHE).status == "abstained"
+    # The empty response's usage is still counted.
+    assert usage.requests == 2 and usage.usage_complete and usage.prompt_tokens == 2800
+
+
+@pinned
+def test_an_unsupported_question_submits_an_abstention():
+    def decline(body):
+        assert tool_output(body, "r1")["error"]["code"] == "company_not_found"
+        assert body["tool_choice"] == "required"
+        draft = {"subject": None, "answer": "Microsoft is not supported."}
+        return completion([tool_call("a1", ANSWER_TOOL, draft)])
+
+    provider = FakeProvider([
+        completion([tool_call("r1", "resolve_company", {"identifier": "Microsoft"})]), decline,
+    ])  # fmt: skip
+    run = run_with(provider, question="How much did Microsoft's revenue grow in fiscal 2026?")
+    assert run.status == "drafted"
+    answer = ground(run, data=DATA, cache_dir=CACHE)
+    assert answer.status == "abstained" and [i.code for i in answer.issues] == ["missing_subject"]

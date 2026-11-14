@@ -498,7 +498,7 @@ def test_a_slow_tool_times_out_the_rest_of_the_turn(monkeypatch):
 
 # --- Answer drafts and the single repair ------------------------------------------------------
 
-BAD = ModelTurn(answer={"answer": "Revenue was {revenue}."})  # placeholder never declared
+BAD = ModelTurn(answer={"answer": "Revenue grew.", "confidence": 0.9})  # an unknown field
 
 
 @pinned
@@ -533,8 +533,7 @@ def test_only_one_repair_is_attempted(second):
         {"answer": "{a}", "values": [{"placeholder": "a", "value_id": "478834000000"}]},
         {"answer": "x", "quotes": [{"citation_id": "c", "text": "y" * 301}]},
         {"answer": "x", "citations": [f"c{i}" for i in range(6)]},
-        {"answer": "{a} {a}", "values": [{"placeholder": "a", "value_id": "obs:" + "0" * 64},
-                                         {"placeholder": "a", "value_id": "obs:" + "1" * 64}]},
+        {"answer": "x", "values": [{"value_id": "62673000000"}]},  # a number, not a value_id
     ],
 )  # fmt: skip
 def test_malformed_drafts_are_rejected_after_one_repair(answer):
@@ -693,5 +692,5 @@ def test_the_prompt_asks_for_exact_citation_ids_and_commentary_only_when_asked()
     model = ScriptedModel([PLAIN])
     run(model)
     prompt = model.received[0][0].content
-    assert "copied exactly, character for character" in prompt
+    assert "copied exactly, character for character" in " ".join(prompt.split())
     assert "A question that only asks for\n   the figures needs no search" in prompt

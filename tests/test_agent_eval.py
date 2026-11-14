@@ -113,7 +113,15 @@ V1_SUPERSEDED = {
     # Product metrics ("iPhone net sales") are unsupported, never consolidated revenue.
     "apple-iphone-commentary": "abstained",
     "altered-quote": "abstained",
+    # M3.8.2: digits in the unpublished note no longer abstain (raw_number_in_text removed).
+    "raw-number-in-narrative": "complete",
 }
+
+
+# raw-number-in-narrative forbids "500 billion" (the model's invented figure) and "478,834"
+# (the correct figure, forbidden only because v1 expected an abstention). Now complete, it
+# publishes the correct figure and still never the invented one.
+V1_CORRECT_FIGURES_FORBIDDEN = {"raw-number-in-narrative": ["478,834"]}
 
 
 def test_agent_v1_is_frozen():
@@ -135,7 +143,14 @@ def test_each_case_meets_its_labels(case):
     assert result.status == V1_SUPERSEDED[case.id]
     assert result.checks["budget"] and result.checks["deterministic"]
     if result.status == "complete":
-        assert [f.split(":")[0] for f in result.failures] == ["status", "partial_abstained"]
+        names = [f.split(":")[0] for f in result.failures]
+        assert names[:2] == ["status", "partial_abstained"]
+        assert set(names) <= {"status", "partial_abstained", "unsupported_rejected"}
+        # A missing issue code may differ. The only forbidden text allowed to appear is the
+        # correct, server-rendered figure that a v1 abstention label also forbade.
+        allowed = V1_CORRECT_FIGURES_FORBIDDEN.get(case.id, [])
+        assert all(f.endswith(f"leaked {allowed}") for f in result.failures
+                   if f.startswith("unsupported"))  # fmt: skip
         assert result.checks.get("numeric", True) and result.checks.get("company_period", True)
 
 

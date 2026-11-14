@@ -42,6 +42,7 @@ from financial_analyst.config import Settings
 from financial_analyst.grounding import GroundedAnswer, ground
 from financial_analyst.llm_provider import (
     OpenAICompatibleModel,
+    ProviderCall,
     ProviderConfigError,
     ProviderSettings,
     Usage,
@@ -114,15 +115,18 @@ class LiveCaseResult(BaseModel):
     usage: Usage
     error: str | None
     diagnostics: RunDiagnostics
+    provider_calls: list[ProviderCall]  # timing, usage and response shape; never content
 
 
 class LiveEvalReport(BaseModel):
     model: str
     attempted: int
     metrics: dict[str, tuple[int, int]]  # name -> (passed, applicable)
-    prompt_tokens: int
+    requests: int
+    requests_without_usage: int  # their tokens and cost are unknown, not zero
+    prompt_tokens: int  # over the requests that reported usage
     completion_tokens: int
-    estimated_cost_usd: Decimal | None
+    estimated_cost_usd: Decimal | None  # a lower bound when requests_without_usage > 0
     latency_seconds_total: float
     latency_seconds_median: float
     latency_seconds_max: float
@@ -165,7 +169,7 @@ def evaluate_live(
         with model_factory() as model:
             run = run_agent(case.question, model, data=data, cache_dir=cache_dir)
             answer = ground(run, data=data, cache_dir=cache_dir)
-            usage = model.usage()
+            usage, calls = model.usage(), list(model.calls)
         if isinstance(case, EvalCaseV2):
             checks, failures = score_v2(case, run, answer)
             expected_status = "/".join(case.expected.acceptable_statuses)
@@ -178,7 +182,7 @@ def evaluate_live(
             grounding_pass=None if run.status != "drafted" else not answer.issues,
             checks=checks, failures=failures, tool_calls=len(run.tool_results),
             model_turns=run.model_turns, usage=usage, error=run.error,
-            diagnostics=diagnose(run, answer),
+            diagnostics=diagnose(run, answer), provider_calls=calls,
         ))  # fmt: skip
 
     def rate(name: str) -> tuple[int, int]:
@@ -211,6 +215,8 @@ def evaluate_live(
         model=model_name,
         attempted=len(results),
         metrics=metrics,
+        requests=sum(r.usage.requests for r in results),
+        requests_without_usage=sum(r.usage.requests_without_usage for r in results),
         prompt_tokens=sum(r.usage.prompt_tokens for r in results),
         completion_tokens=sum(r.usage.completion_tokens for r in results),
         estimated_cost_usd=None if None in costs or not costs else sum(costs, Decimal(0)),
@@ -262,14 +268,22 @@ def format_answer(answer: GroundedAnswer) -> str:
 
 
 def format_usage(usage: Usage) -> str:
-    cost = (
-        "not estimated (no prices configured)"
-        if usage.estimated_cost_usd is None
-        else (f"~${usage.estimated_cost_usd:.4f}")
-    )
-    return (f"Usage:   {usage.requests} requests, {usage.prompt_tokens} prompt + "
-            f"{usage.completion_tokens} completion tokens, {usage.latency_seconds:.1f} s, "
-            f"cost {cost}")  # fmt: skip
+    return f"Usage:   {_usage_text(usage)}"
+
+
+def _usage_text(usage: Usage) -> str:
+    """Requests, tokens and cost, saying plainly when some requests reported no usage."""
+    if usage.estimated_cost_usd is None:
+        cost = "cost not estimated (no prices configured)"
+    elif usage.usage_complete:
+        cost = f"~${usage.estimated_cost_usd:.4f}"
+    else:
+        cost = f"at least ~${usage.estimated_cost_usd:.4f}"
+    unknown = (f" ({usage.requests_without_usage} without usage: their tokens are unknown)"
+               if not usage.usage_complete else "")  # fmt: skip
+    return (f"{usage.requests} requests{unknown}, {usage.prompt_tokens} prompt + "
+            f"{usage.completion_tokens} completion tokens, {cost}, "
+            f"{usage.latency_seconds:.1f} s")  # fmt: skip
 
 
 def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = None) -> int:
@@ -337,11 +351,6 @@ def format_case(result: LiveCaseResult) -> str:
     verdict = "ok  " if not result.failures else "FAIL"
     tools = " > ".join(f"{s.name} {'ok' if s.ok else s.error_code}" for s in d.tools) or "none"
     reached = ", ".join(f"{name} {'yes' if hit else 'no'}" for name, hit in d.reached.items())
-    cost = (
-        "cost not estimated"
-        if usage.estimated_cost_usd is None
-        else (f"~${usage.estimated_cost_usd:.4f}")
-    )
     lines = [
         f"{verdict} {result.id}: agent {result.run_status}, answer {result.status} "
         f"(expected {result.expected_status})",
@@ -350,11 +359,16 @@ def format_case(result: LiveCaseResult) -> str:
         f"    ended: {d.terminal_reason}",
         *[f"    draft rejected: {', '.join(codes)}" for codes in d.draft_rejections],
         f"    grounding issues: {', '.join(d.issue_codes) or 'none'}",
-        f"    {usage.requests} requests, {usage.prompt_tokens} prompt + "
-        f"{usage.completion_tokens} completion tokens, {cost}, {usage.latency_seconds:.1f} s",
-    ]
+        f"    {_usage_text(usage)}",
+        *[f"    provider error {c.error_kind}: {_shape_text(c)}"
+          for c in result.provider_calls if c.outcome == "error"],
+    ]  # fmt: skip
     lines += [f"    check failed: {failure}" for failure in result.failures]
     return "\n".join(lines)
+
+
+def _shape_text(call: ProviderCall) -> str:
+    return call.shape.summary() if call.shape else "no response body"
 
 
 def _count(n: int, noun: str) -> str:
@@ -367,11 +381,13 @@ def _print_report(report: LiveEvalReport, settings: ProviderSettings) -> None:
     print(f"attempted              {report.attempted}")
     for name, (passed, total) in report.metrics.items():
         print(f"{name:<22} {passed}/{total}")
-    cost = (
-        "not estimated"
-        if report.estimated_cost_usd is None
-        else (f"~${report.estimated_cost_usd:.4f}")
-    )
+    if report.estimated_cost_usd is None:
+        cost = "not estimated"
+    else:
+        bound = "at least " if report.requests_without_usage else ""
+        cost = f"{bound}~${report.estimated_cost_usd:.4f}"
+    print(f"requests               {report.requests} "
+          f"({report.requests_without_usage} without usage)")  # fmt: skip
     print(f"tokens                 {report.prompt_tokens} prompt + "
           f"{report.completion_tokens} completion; cost {cost}")  # fmt: skip
     total, median = report.latency_seconds_total, report.latency_seconds_median

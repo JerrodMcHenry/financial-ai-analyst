@@ -7,7 +7,8 @@ period, label and provenance field is formatted here, not by the model.
 
 What can be checked mechanically, and is:
 - each value_id was produced in this run and belongs to the answer's subject comparison
-  (same company, metric and periods); the narrative contains no digits of its own;
+  (same company, metric and periods). The model's own note is never published, so it is
+  not checked for numbers: nothing it says can reach the answer;
 - each citation is a verified passage from this run's search of the subject's commentary
   filing, and the cached source still matches it (bytes, citation identity; optionally a
   full rebuild);
@@ -26,7 +27,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from financial_analyst.agent import PLACEHOLDER, AgentRunResult, RunPassage
+from financial_analyst.agent import AgentRunResult, RunPassage
 from financial_analyst.analysis import MDA_SECTIONS, PinnedData, format_percent
 from financial_analyst.filing_cache import load_filing_document
 from financial_analyst.financial_tools import Comparison, Fact, concept_mapping
@@ -38,7 +39,7 @@ from financial_analyst.passages import (
 )
 from financial_analyst.request_scope import RequestScope, capture_scope, check_subject
 
-GROUNDING_VERSION = "2"  # 2: commentary required only when asked; request scope
+GROUNDING_VERSION = "3"  # 3: no digit rule; model text kept out of the answer
 _PREVIEW_CHARS = 240
 
 IssueCode = Literal[
@@ -48,7 +49,6 @@ IssueCode = Literal[
     "subject_not_in_run",  # the named comparison was not produced in this run
     "value_not_in_run",  # unknown, invented, stale or other-run value_id
     "value_context_mismatch",  # a value for another company, metric or period
-    "raw_number_in_text",  # digits in the narrative instead of placeholders
     "scope_unresolved",  # the question's company, metric or periods cannot be read reliably
     "scope_mismatch",  # the subject comparison answers another question
     # Only the item is rejected (the answer is at most partial):
@@ -61,7 +61,7 @@ IssueCode = Literal[
 ]
 _ABSTAIN = frozenset(
     {"run_not_drafted", "missing_subject", "subject_not_in_run", "value_not_in_run",
-     "value_context_mismatch", "raw_number_in_text", "scope_unresolved", "scope_mismatch"}
+     "value_context_mismatch", "scope_unresolved", "scope_mismatch"}
 )  # fmt: skip
 
 LIMITATIONS = (
@@ -84,12 +84,14 @@ class ValidationIssue(BaseModel):
 
 
 class WithheldClaim(BaseModel):
-    """Model content that is not published, and why."""
+    """Model content that is not published, and why. Its text stays only in the run record
+    (AgentRunResult.draft); the answer carries its length, so no model-written wording can
+    reach anyone through the answer object."""
 
     model_config = ConfigDict(frozen=True)
 
     kind: Literal["model_narrative", "explanation"]
-    text: str
+    characters: int
     citation_id: str | None
     reason: str
 
@@ -153,7 +155,7 @@ def validate_draft(
         return report()
     withheld = [
         WithheldClaim(
-            kind="model_narrative", text=draft.answer, citation_id=None,
+            kind="model_narrative", characters=len(draft.answer), citation_id=None,
             reason="model wording is not published: only server-rendered figures, verified "
             "quotations and candidate commentary are",
         )
@@ -175,9 +177,6 @@ def validate_draft(
         problem = _value_problem(value.value_id, subject, evidence.comparisons, evidence.facts)
         if problem:
             flag(problem[0], value.value_id, problem[1])
-    if any(ch.isdigit() for ch in PLACEHOLDER.sub("", draft.answer)):
-        flag("raw_number_in_text", None,
-             "digits in the narrative; numbers must be placeholders for tool values")  # fmt: skip
 
     wanted = list(dict.fromkeys(
         draft.citations + [q.citation_id for q in draft.quotes]
@@ -192,8 +191,10 @@ def validate_draft(
             flag("quote_citation_invalid", quote.citation_id,
                  "the quoted passage is not a grounded citation")  # fmt: skip
         elif quote.text not in item.passage.text:
+            # The rejected wording is not echoed: issue details are printed to users.
             flag("quote_not_verbatim", quote.citation_id,
-                 f"not an exact substring of the passage: {quote.text[:80]!r}")  # fmt: skip
+                 f"the {len(quote.text)}-character quotation is not an exact substring of the "
+                 "cited passage")  # fmt: skip
         elif quote.attribution == "management" and not _in_mda(item, subject):
             flag("attribution_unsupported", quote.citation_id,
                  "management attribution needs a passage in the filing's MD&A section")  # fmt: skip
@@ -203,7 +204,8 @@ def validate_draft(
 
     for explanation in draft.explanations:
         withheld.append(WithheldClaim(
-            kind="explanation", text=explanation.text, citation_id=explanation.citation_id,
+            kind="explanation", characters=len(explanation.text),
+            citation_id=explanation.citation_id,
             reason="interpretations and causes cannot be verified deterministically; a cited, "
             "verified passage is shown only as candidate commentary",
         ))  # fmt: skip
