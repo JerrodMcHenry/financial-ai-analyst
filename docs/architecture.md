@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.4 implemented** (owner-approved: evaluation harness, real dataset and BM25 baseline); **Milestone 2.5 B1–B2 approved (batch verification, held-out dataset); B3 (semantic and hybrid retrieval) awaiting review**. Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **Next: M3, deterministic financial tools and a grounded tool-calling agent.** Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-13
 
 ---
@@ -608,9 +608,9 @@ Citation correctness and filter compliance are integrity conditions, not metrics
 - **Unanswerable questions** were checked by pattern search over every block of all three filings. Related but unsupporting text exists on purpose, as a hard negative: JPMorgan's "outlook", climate-risk mentions, December 2025 capital ratios, and mentions of Apple's retail stores without a count.
 - **Small sample:** with 36 answerable questions, one question moves Hit@5 by about 2.8 points.
 
-### 3.2h Milestone 2.5 B3: semantic and hybrid retrieval (experiment, awaiting review)
+### 3.2h Milestone 2.5: semantic and hybrid retrieval (experiment complete, not adopted)
 
-`semantic_retrieval.py` (optional `semantic` extra) ranks the same `Passage` objects as BM25. Decisions: D-028 (frozen comparison protocol and adoption criteria), D-029 (model, runtime, fusion).
+**Outcome:** hybrid not adopted; BM25 remains the default (D-028). `semantic_retrieval.py` stays available as an optional experiment, inactive unless `--retriever semantic|hybrid` is chosen and the `semantic` extra is installed. It ranks the same `Passage` objects as BM25. Decisions: D-028 (frozen comparison protocol and adoption criteria), D-029 (model, runtime, fusion).
 
 ```
 install once (network):  install_model → pinned commit 5c38ec7c… → verify sizes and SHA-256 → data/models/… (git-ignored)
@@ -644,6 +644,33 @@ search(query, filters):  semantic: cosine over the filtered rows → ties as BM2
   - Embedding all 1,207 passages on one thread takes about 350 s, so semantic and hybrid evaluation runs take about 6 minutes instead of 11 s.
   - Loading the model takes about 0.9 s.
   - 61 passages exceed 512 tokens and are truncated (the longest has 1,867).
+
+**Held-out result (M2.5 B4, the decision basis; full record in D-028):**
+
+| Retriever | Hit@5 overall | Direct | Paraphrase | MRR@10 | Citations verified | Warm p95 |
+|---|---|---|---|---|---|---|
+| BM25 | **23/36** | **15/16** | 8/20 | **0.469** | 277/277 | 1.8 ms |
+| Semantic | 20/36 | 10/16 | **10/20** | 0.416 | 200/200 | 17.8 ms |
+| Hybrid | 22/36 | 14/16 | 8/20 | 0.444 | 253/253 | 20.2 ms |
+
+- **Criteria:** hybrid failed the pre-registered paraphrase criterion (no gain) and passed the other three.
+- **Runs:** six offline runs, each matching its repeat in every non-timing field.
+- **Reports:** `evals/results/retrieval_v2_heldout.{bm25,semantic,hybrid}.json`.
+
+**Evaluation limitations found in the held-out run (recorded, not fixed; the frozen datasets and reports are unchanged):**
+- **Missing relevant labels:**
+  - `h-aapl-10q-online-safety-minors`: the Apple 10-K's risk factor (blocks 221–222) carries the same online-safety disclosure as the labeled 10-Q text but isn't labeled. The B2 exact-text check missed it over a one-comma difference.
+  - `h-jpm-markets-revenue-q3`: the third-quarter Markets revenue table (block 492) gives the requested amounts but isn't labeled.
+  - Both cases understate MRR for whichever retriever ranks them. They would be fixed only in a reviewed dataset revision, never in place.
+- **Alternative versus complementary evidence:** a question's spans are either *alternatives* (the same fact repeated in several places, such as a note and the auditor's report, or a 10-K and a 10-Q) or *complementary* (different facts the answer needs). Labeled-evidence recall@5 treats both kinds the same. Below 1.0 means an incomplete answer only for complementary spans.
+- **Relevance versus completeness:** Hit@5 and MRR measure whether one passage covers at least 80% of one labeled span. That shows retrieval relevance, not whether the top five hold a complete or correct answer. A retrieved passage is evidence for a reader, never a financial answer by itself.
+- **Unanswerable questions always return passages:**
+  - All three retrievers return 10 results for every unanswerable question, often plausible-looking. For example, CET1 tables for December 2025 and September 2026 come back when asked about December 2026, and quarterly sales text comes back when asked for guidance.
+  - Scores don't separate these from answerable questions (BM25 top score 25.4 for one unanswerable question). Abstaining needs more than a retrieval score.
+- **Wrong-company and wrong-period matches:**
+  - Wrong company: a JPMorgan passage first for an Apple question (commercial paper, internal controls), and an Apple risk factor first for a JPMorgan question (litigation).
+  - Wrong period: the 10-Q ranked above the 10-K for fiscal-year questions, or the reverse for June-quarter questions (ASU 2023-09 adoption, manufacturing obligations, services margin, control changes).
+  - Filtered searches scoped to the right filing hit 7/7 for every retriever. Scoping by company and period, as in M3, addresses this whichever retriever is used.
 
 ### 3.3 Later milestone: ingestion
 

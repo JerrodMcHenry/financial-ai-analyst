@@ -1,0 +1,1851 @@
+{
+  "retriever": {
+    "name": "bm25",
+    "rrf_k": null,
+    "rrf_depth": null,
+    "model_repo": null,
+    "model_revision": null,
+    "model_file": null,
+    "model_file_sha256": null,
+    "model_fingerprint": null,
+    "embedding_dim": null,
+    "max_tokens": null,
+    "threads": null,
+    "batch_size": null,
+    "embedding_sha256": null,
+    "passages_truncated": null,
+    "max_passage_tokens": null
+  },
+  "dataset_version": "1",
+  "dataset_sha256": "2d42950ab5ec9e5b6f0fc8069a0ef55c3eb22967e8bb8d2dbb0de5da861eb43c",
+  "documents": [
+    {
+      "key": "aapl-10k-2026",
+      "cik": "0000320193",
+      "accession_number": "0000320193-26-000026",
+      "form": "10-K",
+      "primary_document": "aapl-20260926.htm",
+      "filing_date": "2026-11-03",
+      "content_sha256": "ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231",
+      "extractor_version": "2",
+      "builder_version": "1"
+    },
+    {
+      "key": "aapl-10q-2026-06",
+      "cik": "0000320193",
+      "accession_number": "0000320193-26-000020",
+      "form": "10-Q",
+      "primary_document": "aapl-20260627.htm",
+      "filing_date": "2026-07-31",
+      "content_sha256": "ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5",
+      "extractor_version": "2",
+      "builder_version": "1"
+    },
+    {
+      "key": "jpm-10q-2026-09",
+      "cik": "0000019617",
+      "accession_number": "0001628280-26-069523",
+      "form": "10-Q",
+      "primary_document": "jpm-20260930.htm",
+      "filing_date": "2026-11-03",
+      "content_sha256": "2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b",
+      "extractor_version": "2",
+      "builder_version": "1"
+    }
+  ],
+  "passages_indexed": 1207,
+  "relevance_threshold": 0.8,
+  "overall": {
+    "questions": 36,
+    "hit_at_5": 0.6388888888888888,
+    "mrr_at_10": 0.4687830687830688,
+    "labeled_evidence_recall_at_5": 0.5856481481481481,
+    "combined_evidence_coverage_at_5": 0.5856481481481481,
+    "section_precision_at_5": 0.44800000000000006,
+    "section_precision_questions": 25
+  },
+  "direct": {
+    "questions": 16,
+    "hit_at_5": 0.9375,
+    "mrr_at_10": 0.84375,
+    "labeled_evidence_recall_at_5": 0.8802083333333334,
+    "combined_evidence_coverage_at_5": 0.8802083333333334,
+    "section_precision_at_5": 0.5090909090909091,
+    "section_precision_questions": 11
+  },
+  "paraphrase": {
+    "questions": 20,
+    "hit_at_5": 0.4,
+    "mrr_at_10": 0.1688095238095238,
+    "labeled_evidence_recall_at_5": 0.35,
+    "combined_evidence_coverage_at_5": 0.35,
+    "section_precision_at_5": 0.39999999999999997,
+    "section_precision_questions": 14
+  },
+  "filtered": {
+    "questions": 7,
+    "hit_at_5": 1.0,
+    "mrr_at_10": 0.9285714285714286,
+    "labeled_evidence_recall_at_5": null,
+    "combined_evidence_coverage_at_5": null,
+    "section_precision_at_5": null,
+    "section_precision_questions": 0
+  },
+  "questions": [
+    {
+      "id": "h-aapl-10k-indirect-channel-share",
+      "kind": "direct",
+      "topic": "business",
+      "asks_for_amount": true,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b76.0-77.727:t737ec416c2ba0706",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b95.0-96.680:td0f99a555619dcbb",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b151.0-153.162:t080160a308ee4c87",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b349.0-349.456:td38f6a7698aae727",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b201.0-201.601:t14f40ede9a5ea399",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2416.0-2425.95:t2643a5b291ff47c6",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b252.0-256.29:t6777ae3dd9110f71",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b469.0-471.161:t148c01f4a128d2b6",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b45.0-45.443:t92eb818df2de68b6",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b157.0-158.488:t18ede933553b54fc"
+      ],
+      "scores": [
+        32.566075589536105,
+        28.37292804895074,
+        26.69803577530049,
+        13.706816168006835,
+        13.154662260661128,
+        12.437684126914467,
+        11.914894302151403,
+        11.8596170507318,
+        10.98564646980032,
+        10.982091325041743
+      ],
+      "relevant_ranks": [
+        1
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.4
+    },
+    {
+      "id": "h-aapl-10k-workforce-size",
+      "kind": "paraphrase",
+      "topic": "business",
+      "asks_for_amount": true,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b65.0-70.520:t2eb95badec417025",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b431.0-436.529:tcc8c749abb8f1caf",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b37.0-38.389:t1ba7da87d6f30de1",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b97.0-100.327:t9f05c0b443b3075e",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b283.0-301.11:t6a5c0f99effd6428",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b45.0-45.443:t92eb818df2de68b6",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b281.0-282.581:tbf5d5547cffaa5fe",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b252.0-256.29:t6777ae3dd9110f71",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b47.0-49.255:teecfabed739d9941",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b0.0-10.33:t13f395ca1150c667"
+      ],
+      "scores": [
+        13.280183761689196,
+        13.231661840434542,
+        12.83224489375396,
+        12.018046613340417,
+        11.998373830422748,
+        10.98564646980032,
+        9.995105642783454,
+        9.894808597768773,
+        9.34666138301463,
+        9.030863846608659
+      ],
+      "relevant_ranks": [
+        4
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 0.25,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.2
+    },
+    {
+      "id": "h-aapl-10k-employee-development",
+      "kind": "paraphrase",
+      "topic": "business",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b243.0-244.5:t6eaf96fc8b9e1905",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b273.0-275.32:t412a4bdf3231895e",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b97.0-100.327:t9f05c0b443b3075e",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1942.0-1944.99:tc89136e458140694",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b39.0-43.1358:t8857d6a06ad0ca16",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b90.0-92.651:t02e89ea0bc88d7d4",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b370.0-374.32:t84033903fc0e8f08",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b100.0-103.155:t321f492a6d283fe5",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b284.0-285.576:t872b75b4854b91d5",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b149.0-150.575:td469b06e91cb3414"
+      ],
+      "scores": [
+        9.999240814912458,
+        9.862495975263162,
+        9.62537170944751,
+        8.910051291454842,
+        8.488124380917508,
+        8.385407295878462,
+        8.17574651939082,
+        7.98371995297997,
+        7.96154098006904,
+        7.674036433921897
+      ],
+      "relevant_ranks": [
+        3
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 0.3333333333333333,
+      "labeled_evidence_recall_at_5": 0.5,
+      "combined_evidence_coverage_at_5": 0.5,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.2
+    },
+    {
+      "id": "h-aapl-10k-final-assembly",
+      "kind": "paraphrase",
+      "topic": "business",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b624.0-625.285:te1a970f9b3cedbbb",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b62.0-73.129:t5caa676e9c6d6dfd",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2136.0-2139.349:t42caadfda6074658",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b152.0-156.32:t9181c42ccfbec671",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b628.0-628.144:tfca89d44855508dc",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b117.1867-119.31:ta6d9a2f6b0d15bd1",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b147.0-149.594:t0d9e30460d9655f5",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b626.0-626.217:ta4fbdbc09c4275bd",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b74.0-75.784:t58e2f60bc9d98c9f",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b259.0-263.483:t7ef0026429c2f0b7"
+      ],
+      "scores": [
+        9.360533605818864,
+        8.080716934661467,
+        6.064444241930027,
+        5.7616343384189594,
+        5.757979730015609,
+        5.681521588628073,
+        5.54366518577301,
+        5.500334211423379,
+        5.4498443911432926,
+        5.3667947676895125
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": 0.0,
+      "reciprocal_rank_at_10": 0.0,
+      "labeled_evidence_recall_at_5": 0.0,
+      "combined_evidence_coverage_at_5": 0.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.6
+    },
+    {
+      "id": "h-aapl-10k-agentic-ai-risk",
+      "kind": "direct",
+      "topic": "risk",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b184.0-186.1112:t58683da8109d2646",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b177.0-179.32:t88472f21e5e4ee38",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b189.0-190.182:te45a60ec9cdc539d",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b143.0-144.1819:t32d0d63337485ea6",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b187.0-188.32:t068aa1f6cc5a30af",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b182.0-183.1698:t9bc3ce86df6d51e7",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b614.0-615.32:t47df778cf867253f",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b194.0-194.1507:tb7b6a7ef10991009",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b350.0-354.32:t2fec786b01e19c9f",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1194.0-1200.2:te96c68f1f028733b"
+      ],
+      "scores": [
+        29.74519536341491,
+        21.97600312755625,
+        15.533562631036496,
+        15.041845892148098,
+        14.712832765668626,
+        13.914717497952186,
+        12.660523779695836,
+        11.952919957458295,
+        11.805498767887478,
+        11.327198880538615
+      ],
+      "relevant_ranks": [
+        1,
+        5
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 1.0
+    },
+    {
+      "id": "h-aapl-10k-reseller-dependence",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b272.0-272.1604:t8cfae6c7ab498592",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b169.0-171.871:tb3a0c285f51151d4",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b215.0-215.1684:t20270a9fc4fdb662",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2416.0-2425.95:t2643a5b291ff47c6",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b120.0-120.1136:t2c0a89a59218faa8",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b127.0-128.31:t27e26030dc259f96",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b204.0-206.32:ta2b45fdb24bc9304",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b177.0-179.32:t88472f21e5e4ee38",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b269.0-271.35:tccd02fd553c28216",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b231.0-233.32:t0e3851a15fe8fe9f"
+      ],
+      "scores": [
+        12.55649850746186,
+        11.85344065938484,
+        11.573387216391342,
+        11.374834941454614,
+        10.43785064000474,
+        9.874551984724606,
+        9.82584995591776,
+        9.437431152018835,
+        9.407884994230926,
+        9.341896748303535
+      ],
+      "relevant_ranks": [
+        2
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 0.5,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.6
+    },
+    {
+      "id": "h-aapl-10k-excess-inventory-risk",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b195.0-195.1332:tb3fa7c30009824a4",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b93.0-94.31:t76417f384a5e3dc4",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b274.0-275.1645:t8856d92a64fc1840",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b204.0-206.32:ta2b45fdb24bc9304",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b159.0-160.171:tad1683339f49e47a",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2083.0-2084.513:tb3a3b0e24c79f7a8",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b217.0-218.1631:t9232d1adadc00f17",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b127.0-128.31:t27e26030dc259f96",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b169.0-171.871:tb3a0c285f51151d4",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b174.0-175.970:t113b50507224566a"
+      ],
+      "scores": [
+        11.550365077422734,
+        9.800460292032689,
+        9.701319204776553,
+        9.443791791385113,
+        8.909669006477497,
+        8.840081464990885,
+        8.748579516892859,
+        8.51028690570602,
+        8.205201806608432,
+        8.162713471558845
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": 0.0,
+      "reciprocal_rank_at_10": 0.0,
+      "labeled_evidence_recall_at_5": 0.0,
+      "combined_evidence_coverage_at_5": 0.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.6
+    },
+    {
+      "id": "h-aapl-10k-dollar-exposure",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b226.0-229.498:t9b6072096c74059d",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b393.0-396.32:tf18356a4357830e8",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b311.0-321.32:td4fe33c9bce4bd6b",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b163.0-173.368:te104e3d37ec39d54",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b216.0-216.764:tb72e6e82d55f0c58",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b273.0-273.787:t8b5f53d530ada98d",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1373.0-1375.279:t79658ab4af69ddce",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b225.1911-225.2423:t4dca9a489404aee6",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b189.0-190.182:te45a60ec9cdc539d",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b325.0-336.32:t1f2eb1142c710eff"
+      ],
+      "scores": [
+        20.914381327458635,
+        16.235098544694015,
+        12.321824750432906,
+        11.674679338027115,
+        10.356459587800202,
+        10.255143795859762,
+        9.608282276146152,
+        9.000914415340105,
+        8.859714637032635,
+        8.631797240073977
+      ],
+      "relevant_ranks": [
+        1,
+        2
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.6
+    },
+    {
+      "id": "h-aapl-10k-fx-value-at-risk",
+      "kind": "direct",
+      "topic": "risk",
+      "asks_for_amount": true,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b393.0-396.32:tf18356a4357830e8",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b495.0-503.152:t9706692f68ca6cf0",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b88.0-94.18:t1aba0d95ae21399b",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1088.0-1088.1359:t559f934c0f599a36",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1421.0-1421.1628:ta2f1f335863d178c",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1464.0-1470.3:taea2a937b548b5d1",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1100.0-1107.2:t8d1e4091f9b86dac",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b579.0-581.109:t480e4d091619363d",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b410.0-410.1016:t09e34bf568a21d83",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1473.0-1475.836:taf05bd53dc2090bf"
+      ],
+      "scores": [
+        33.417303311144245,
+        22.678739344699054,
+        17.317170844442142,
+        17.11114483887584,
+        16.963727435065078,
+        16.397199950106717,
+        16.200282768478363,
+        15.964382737881223,
+        15.508751118802389,
+        15.243986624321392
+      ],
+      "relevant_ranks": [
+        1
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.2
+    },
+    {
+      "id": "h-aapl-10k-rate-shock-portfolio",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "asks_for_amount": true,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b389.0-391.299:td5ce1d58912d9fe0",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1969.0-1969.496:t2b037d5e8670f3bf",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2288.0-2308.221:t82300bf58e0bbc87",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b550.0-552.163:t465325b4d1d1dfe2",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1141.0-1145.708:t8df66364de8ace3e",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1965.0-1968.271:t6514660dddb37006",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b95.0-97.147:tdfd12fa1700a70b1",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b579.0-581.109:t480e4d091619363d",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2317.0-2321.34:tb0fa4f68e06c792a",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1081.0-1084.2:ta3a255c0ce013d4b"
+      ],
+      "scores": [
+        17.028413124455977,
+        14.66361745472736,
+        12.952596099739466,
+        12.620064218681648,
+        12.207704229410979,
+        12.191834800623106,
+        11.256638561518525,
+        11.244677993193157,
+        10.618682618996768,
+        10.600970421912159
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": 0.0,
+      "reciprocal_rank_at_10": 0.0,
+      "labeled_evidence_recall_at_5": 0.0,
+      "combined_evidence_coverage_at_5": 0.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.2
+    },
+    {
+      "id": "h-aapl-10k-rd-expense-drivers",
+      "kind": "direct",
+      "topic": "mda",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b350.0-354.32:t2fec786b01e19c9f",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b202.0-205.257:te6f3db15264234a1",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b88.0-89.659:te8b247a481a12345",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b45.0-45.443:t92eb818df2de68b6",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b431.0-436.529:tcc8c749abb8f1caf",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b142.0-142.1241:t686323fd9dcc168b",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b143.0-143.1273:t9916bd8ecd7ae48f",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b65.0-70.520:t2eb95badec417025",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b349.0-349.456:td38f6a7698aae727",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b544.0-544.373:t2f9fd1ac3950dcc8"
+      ],
+      "scores": [
+        21.18652242232311,
+        16.70395291525949,
+        12.003255298281465,
+        10.98564646980032,
+        10.901885922660735,
+        10.520940447845826,
+        10.520940447845826,
+        10.503089943979216,
+        10.36592919183098,
+        10.1443189830087
+      ],
+      "relevant_ranks": [
+        1
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.2
+    },
+    {
+      "id": "h-aapl-10k-unrecognized-tax-benefits",
+      "kind": "direct",
+      "topic": "accounting",
+      "asks_for_amount": true,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b550.0-552.163:t465325b4d1d1dfe2",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b640.0-640.823:t8c547cfc1eb63c9c",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b209.0-211.35:t9c714de094491530",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b602.0-603.32:t89ee195deadd850b",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b530.0-533.819:tbaedda095df675bd",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1894.0-1896.586:td00986a6d2e5dbd1",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b546.0-547.159:taf89324c68e0d489",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1899.0-1899.722:t71786709ba2ea91a",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b231.0-238.2:t2976c8e466258a2e",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b511.0-512.188:tbcb77be3f830fd72"
+      ],
+      "scores": [
+        30.359366800446367,
+        21.555596100153057,
+        21.44157795645198,
+        16.276848018088693,
+        12.289553659867103,
+        11.148794456451228,
+        11.067278409748521,
+        11.010466328312962,
+        10.994729875030728,
+        10.162581575571863
+      ],
+      "relevant_ranks": [
+        1,
+        2
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.8
+    },
+    {
+      "id": "h-aapl-10k-inventory-costing",
+      "kind": "paraphrase",
+      "topic": "accounting",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b95.0-97.147:tdfd12fa1700a70b1",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b495.0-503.152:t9706692f68ca6cf0",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1163.0-1163.2458:td6d4342fdfd652bc",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1965.0-1968.271:t6514660dddb37006",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b489.0-494.188:t98730c0990575202",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b88.0-94.18:t1aba0d95ae21399b",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b127.0-128.31:t27e26030dc259f96",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1969.0-1969.496:t2b037d5e8670f3bf",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1502.0-1503.706:t3600b087d27d19c4",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b974.0-979.321:tb45e8d8287b4766d"
+      ],
+      "scores": [
+        13.148758305823415,
+        12.153101008787464,
+        12.069032691363219,
+        11.77916181834512,
+        11.607681971225011,
+        11.321968962948192,
+        10.183644342546271,
+        9.690983337432526,
+        9.627284818757643,
+        9.574852769123376
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": 0.0,
+      "reciprocal_rank_at_10": 0.0,
+      "labeled_evidence_recall_at_5": 0.0,
+      "combined_evidence_coverage_at_5": 0.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.4
+    },
+    {
+      "id": "h-aapl-10k-asu-2023-09-adoption",
+      "kind": "direct",
+      "topic": "accounting",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b231.0-231.650:t633adfb519e39585",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b437.0-439.666:t77891307beaaf400",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b224.0-230.12:t7a6da0da2b87c714",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b375.0-379.1011:t415e16d5e148152e",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b540.0-541.213:t7ae7d7b480539806",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b262.0-264.32:te33b7c9143f62825",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b554.0-555.32:t18c9178338cacf15",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b65.0-70.520:t2eb95badec417025",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b28.0-32.548:t024ece9e75314db4",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b288.0-290.35:te02eee2d8a586a0f"
+      ],
+      "scores": [
+        45.02290614465776,
+        38.16678234409912,
+        25.70020334833609,
+        22.275984349978746,
+        17.315352273857794,
+        16.854383616079048,
+        15.941056041334315,
+        15.469789426056503,
+        15.105135101912335,
+        14.191070406795244
+      ],
+      "relevant_ranks": [
+        2
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 0.5,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.4
+    },
+    {
+      "id": "h-aapl-10q-accelerated-repurchases",
+      "kind": "direct",
+      "topic": "mda",
+      "asks_for_amount": true,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b273.0-275.32:t412a4bdf3231895e",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b284.0-285.576:t872b75b4854b91d5",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b196.0-198.32:t73994d8314e800c2",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b120.0-123.35:td05827669e0e1267",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b370.0-374.32:t84033903fc0e8f08",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b239.0-242.32:td2801083a2e66ee5",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b584.0-586.373:ta34ec4a04d4300a1",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b85.0-86.31:t74757a9f062e186c",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b689.0-694.175:t362f7b732ec65ef2",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2102.0-2103.1070:t51422b7de9858c46"
+      ],
+      "scores": [
+        23.13273346286678,
+        21.142427773190896,
+        16.993197436769513,
+        14.135308722937836,
+        13.022970630440959,
+        12.775864239752249,
+        12.294967639736505,
+        12.237523477704919,
+        12.145729052869672,
+        11.286555290019102
+      ],
+      "relevant_ranks": [
+        2
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 0.5,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.2
+    },
+    {
+      "id": "h-aapl-10q-ipad-decline",
+      "kind": "paraphrase",
+      "topic": "mda",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b74.0-76.34:t0582c20e8d6dd3d7",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b283.0-301.11:t6a5c0f99effd6428",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2494.0-2497.17:t70ce93675e256da1",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b151.0-153.162:t080160a308ee4c87",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b117.0-117.397:t52c14a27b4cd9b1e",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b95.0-96.680:td0f99a555619dcbb",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b163.0-173.368:te104e3d37ec39d54",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1685.0-1685.1266:t363a933346b5635f",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b469.0-473.2:tdde6789225e3d062",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b469.0-471.161:t148c01f4a128d2b6"
+      ],
+      "scores": [
+        17.242508546927542,
+        16.839615114785744,
+        15.625457808390252,
+        12.569843925267282,
+        12.460722271987501,
+        11.717383929759695,
+        11.41377599176668,
+        11.15724471693617,
+        10.984954232368857,
+        10.712610500809571
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": 0.0,
+      "reciprocal_rank_at_10": 0.0,
+      "labeled_evidence_recall_at_5": 0.0,
+      "combined_evidence_coverage_at_5": 0.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.2
+    },
+    {
+      "id": "h-aapl-10q-greater-china-q3",
+      "kind": "direct",
+      "topic": "mda",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b163.0-173.368:te104e3d37ec39d54",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b311.0-321.32:td4fe33c9bce4bd6b",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b177.0-187.35:t5a4681ad984cef9f",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b473.0-475.344:t5eed475d1f33cf3a",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b74.0-76.34:t0582c20e8d6dd3d7",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b151.0-153.162:t080160a308ee4c87",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b616.0-620.98:t3e0f38aa62dccb88",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b142.0-142.1241:t686323fd9dcc168b",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b143.0-143.1273:t9916bd8ecd7ae48f",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b283.0-301.11:t6a5c0f99effd6428"
+      ],
+      "scores": [
+        27.754850604654745,
+        20.769375655425737,
+        19.230893506104696,
+        18.2267237226434,
+        17.38380521043821,
+        17.362105347732104,
+        17.11889967397903,
+        15.882719394710538,
+        15.882719394710538,
+        15.747698612672806
+      ],
+      "relevant_ranks": [
+        1
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.4
+    },
+    {
+      "id": "h-aapl-10q-services-margin-flat",
+      "kind": "paraphrase",
+      "topic": "mda",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b163.0-173.368:te104e3d37ec39d54",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b74.0-76.34:t0582c20e8d6dd3d7",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b311.0-321.32:td4fe33c9bce4bd6b",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b473.0-475.344:t5eed475d1f33cf3a",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b29.0-36.1:t8e427f5ae35c6241",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b177.0-187.35:t5a4681ad984cef9f",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b192.0-198.35:t2a39b10b89fac356",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b249.1960-252.35:t4fb6a940f357234c",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b261.0-261.660:t823864588c09e29e",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2174.0-2179.231:t315a410f2f90bf41"
+      ],
+      "scores": [
+        24.189916886329698,
+        23.312514371900292,
+        20.563856142402194,
+        19.946743026570555,
+        18.412934753652863,
+        18.038660829652258,
+        17.704622306265904,
+        16.958734367707436,
+        14.369017996395396,
+        14.106478281535605
+      ],
+      "relevant_ranks": [
+        7
+      ],
+      "hit_at_5": 0.0,
+      "reciprocal_rank_at_10": 0.14285714285714285,
+      "labeled_evidence_recall_at_5": 0.0,
+      "combined_evidence_coverage_at_5": 0.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.2
+    },
+    {
+      "id": "h-aapl-10q-commercial-paper",
+      "kind": "paraphrase",
+      "topic": "accounting",
+      "asks_for_amount": true,
+      "citation_ids": [
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b810.0-818.2:t74411e5b9a6e4cd6",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b114.0-116.531:t6dd703ec221c1471",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b95.0-97.147:tdfd12fa1700a70b1",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b118.0-119.381:t3dfad707f0f7a1d3",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1632.0-1634.3:tc6bdbfd6b665c3bb",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b819.0-823.310:te6c5eff983994933",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b752.0-755.556:t912b3f2627877fc9",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b267.0-280.203:t6a3950b462c8fd5c",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b571.0-573.703:t5440376b227b198a",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b252.0-256.29:t6777ae3dd9110f71"
+      ],
+      "scores": [
+        20.684019766177826,
+        16.478671857789497,
+        15.126547312515822,
+        13.982769569394874,
+        13.727820231158866,
+        13.40680012353312,
+        13.051418527288357,
+        11.821361158572483,
+        11.804630464277817,
+        11.679691575907977
+      ],
+      "relevant_ranks": [
+        2
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 0.5,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.6
+    },
+    {
+      "id": "h-aapl-10q-manufacturing-obligations",
+      "kind": "direct",
+      "topic": "mda",
+      "asks_for_amount": true,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b212.0-221.22:t9fd0add526d93eaf",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b133.0-135.474:t720a257bc9378ce5",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b359.0-369.26:tf1410196f26e4d8c",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b604.0-606.479:t1c24c787ccc8d992",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b147.0-149.594:t0d9e30460d9655f5",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b370.0-374.32:t84033903fc0e8f08",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b100.0-104.837:t80f8f48b77a76bad",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b74.0-76.34:t0582c20e8d6dd3d7",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b95.0-97.147:tdfd12fa1700a70b1",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b128.0-128.262:t1572734234410eb7"
+      ],
+      "scores": [
+        23.733446505644313,
+        19.1154801243772,
+        15.29053502154255,
+        13.013471035568347,
+        12.463792037456631,
+        12.06154610953628,
+        11.716506443574605,
+        11.63902919605923,
+        10.546158115330606,
+        9.913452855889908
+      ],
+      "relevant_ranks": [
+        1
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.2
+    },
+    {
+      "id": "h-aapl-epic-supreme-court",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b209.0-210.1514:t110677b07c7a6afe",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b257.0-258.10:t84af93efa5f196a1",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b247.0-248.10:t15c3f67aadc66f16",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b249.0-249.1959:t4e47d4c11bab3b45",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b259.0-260.23:t6595c2959dedd4bf",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2133.0-2135.486:tc6098728ca9b3c00",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b215.0-215.1684:t20270a9fc4fdb662",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b249.1960-252.35:t4fb6a940f357234c",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b272.0-272.1604:t8cfae6c7ab498592",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b158.0-159.1996:t22f5aff6e03ad2f0"
+      ],
+      "scores": [
+        23.631892445523622,
+        22.226255697626346,
+        22.15839651193645,
+        21.643182872509026,
+        19.544283793626214,
+        16.62676764407809,
+        15.26191859363021,
+        15.041883874971447,
+        14.785994025655587,
+        14.663329181177108
+      ],
+      "relevant_ranks": [
+        5,
+        8
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 0.2,
+      "labeled_evidence_recall_at_5": 0.5,
+      "combined_evidence_coverage_at_5": 0.5,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.8
+    },
+    {
+      "id": "h-aapl-doj-antitrust-allegations",
+      "kind": "direct",
+      "topic": "risk",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b247.0-248.10:t15c3f67aadc66f16",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b257.0-258.10:t84af93efa5f196a1",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b215.0-215.1684:t20270a9fc4fdb662",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2133.0-2135.486:tc6098728ca9b3c00",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b269.0-271.35:tccd02fd553c28216",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b252.0-256.29:t6777ae3dd9110f71",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b212.0-214.32:t692e03432f9c2ac4",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2140.0-2143.3:t6e0e8e527942e434",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b243.0-246.29:t793604707ec779f4",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b249.0-249.1959:t4e47d4c11bab3b45"
+      ],
+      "scores": [
+        32.16445478565139,
+        22.06494375175524,
+        17.374124105522476,
+        16.991059738851582,
+        15.083609415212209,
+        14.44406058602111,
+        14.346021224623467,
+        13.31932064624116,
+        13.044657841999133,
+        11.812603065090753
+      ],
+      "relevant_ranks": [
+        1,
+        2,
+        5,
+        7
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0,
+      "labeled_evidence_recall_at_5": 0.75,
+      "combined_evidence_coverage_at_5": 0.75,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.8
+    },
+    {
+      "id": "h-aapl-10q-online-safety-minors",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b189.0-190.182:te45a60ec9cdc539d",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b221.0-222.32:t3f9e6d42991bd6d6",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b196.0-198.32:t73994d8314e800c2",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b278.0-279.35:t9aa245a0f6a72023",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b76.0-77.727:t737ec416c2ba0706",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b202.0-203.646:ta07af57a7a263ea9",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b200.0-201.1013:t2537ed24f008a8de",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b127.0-128.31:t27e26030dc259f96",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b274.0-275.1645:t8856d92a64fc1840",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b97.0-100.327:t9f05c0b443b3075e"
+      ],
+      "scores": [
+        16.787660067051515,
+        14.657774917083511,
+        13.01776631137314,
+        11.943521054829398,
+        11.789836082240933,
+        11.551105477729088,
+        11.330395351980457,
+        10.72020349520336,
+        10.380513570967139,
+        9.974982666394457
+      ],
+      "relevant_ranks": [
+        4
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 0.25,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.2
+    },
+    {
+      "id": "h-aapl-google-search-remedies",
+      "kind": "direct",
+      "topic": "risk",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b272.0-272.1604:t8cfae6c7ab498592",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b215.0-215.1684:t20270a9fc4fdb662",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b269.0-271.35:tccd02fd553c28216",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b212.0-214.32:t692e03432f9c2ac4",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b189.0-190.182:te45a60ec9cdc539d",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b154.0-157.35:t535b4103cfb0366c",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b209.0-210.1514:t110677b07c7a6afe",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b204.0-206.32:ta2b45fdb24bc9304",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b87.1924-87.2673:t67d93720efb02796",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b141.1924-142.222:t50b0c30e2530eba3"
+      ],
+      "scores": [
+        39.60419719222513,
+        38.19452615599057,
+        13.742079722372136,
+        12.45094581171991,
+        11.105587868144905,
+        10.274807077155735,
+        10.081295490210104,
+        9.664355174460109,
+        9.615866438584026,
+        8.40769030811104
+      ],
+      "relevant_ranks": [
+        1,
+        2
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 1.0
+    },
+    {
+      "id": "h-aapl-10q-internal-control-changes",
+      "kind": "paraphrase",
+      "topic": "accounting",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2467.0-2468.995:t3b701a096de32c4d",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b249.1960-252.35:t4fb6a940f357234c",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b261.0-261.660:t823864588c09e29e",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b677.0-679.32:t2e1adf45954b9511",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b239.0-241.35:t0ba94bb836dc81d0",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b29.0-36.89:t174101751d696c45",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b657.0-663.32:t82978b4dc0e013c7",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b28.0-32.548:t024ece9e75314db4",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b650.0-652.505:td07363852491dd76",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b675.0-676.984:t42d6a9e40c7f7f7b"
+      ],
+      "scores": [
+        23.52447971730846,
+        21.73508965368069,
+        19.65748779336811,
+        18.87198357814365,
+        18.795315971687085,
+        16.051465894419223,
+        15.771166219417315,
+        14.650504055717732,
+        14.442830786818543,
+        14.053955534265146
+      ],
+      "relevant_ranks": [
+        5
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 0.2,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": 0.2
+    },
+    {
+      "id": "h-jpm-apple-card-transaction",
+      "kind": "direct",
+      "topic": "business",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1134.0-1135.340:t9e24e0e937450269",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1818.0-1828.61:t0af9ae4d1dafdded",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b29.0-36.1:t8e427f5ae35c6241",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2079.0-2082.3:t16b44083865cff75",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1014.0-1018.2:t4bd654f966837e57",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2220.0-2238.284:t813fa6621a940175",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b409.0-412.2:t6b19f7cc4dd30fab",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2346.0-2356.36:t3c282e4647c5786e",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b463.0-466.977:tb5ef0a115fc8b123",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1846.0-1846.706:t522eaad373c60281"
+      ],
+      "scores": [
+        16.31709966161214,
+        14.825173188781335,
+        12.301245773391026,
+        11.158587561236898,
+        10.22261411298797,
+        9.480131739545527,
+        8.816897697253694,
+        8.256166334548368,
+        7.935553343539114,
+        7.918424550592411
+      ],
+      "relevant_ranks": [
+        2,
+        3
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 0.5,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": null
+    },
+    {
+      "id": "h-jpm-markets-revenue-q3",
+      "kind": "direct",
+      "topic": "mda",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b50.0-53.135:t909e620ce09f50ae",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b492.0-492.1463:tb750dab1e756b02e",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b424.0-424.894:t41cd6afd02ec6f26",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b488.0-491.144:ta04db0ab5e586b9e",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2428.0-2440.163:tdad2e91d8802be52",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b151.0-164.221:t526b97ff629ef91c",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b425.0-425.491:t7b2d9740499473ea",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b88.0-88.782:tf45d3423d1532cfc",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b493.0-493.681:td96d53af8b9abeba",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b449.0-461.205:ta344474da3b212df"
+      ],
+      "scores": [
+        24.61143227469544,
+        20.217276183686163,
+        18.52764827538931,
+        17.9268508134898,
+        16.6863965003018,
+        16.217052946272315,
+        15.920039708395237,
+        15.524652144775311,
+        14.92383346492967,
+        14.893010179655558
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": 0.0,
+      "reciprocal_rank_at_10": 0.0,
+      "labeled_evidence_recall_at_5": 0.0,
+      "combined_evidence_coverage_at_5": 0.0,
+      "split_evidence": 0,
+      "section_precision_at_5": null
+    },
+    {
+      "id": "h-jpm-client-money-growth",
+      "kind": "paraphrase",
+      "topic": "business",
+      "asks_for_amount": true,
+      "citation_ids": [
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b966.0-967.926:t15a7c28b9da268f6",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b910.0-912.2:tc6b06a2e2eebe4e7",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1194.0-1200.2:te96c68f1f028733b",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2444.0-2457.80:tf36d2b6c779af870",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1755.0-1757.116:t70fb5c1fb7ec295d",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b164.0-167.150:t27b0924ccccb18c5",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b734.0-737.224:t243d2cba63d5f3ee",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b849.0-852.74:t40e757ea4029997a",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1416.0-1420.136:ta2985286fc8cf760",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b756.0-756.313:t90f5d884957f7ee8"
+      ],
+      "scores": [
+        10.975292244743676,
+        10.913001378120242,
+        10.431204663536096,
+        10.082456912016205,
+        9.277226567088789,
+        9.137122316334155,
+        8.963083638251325,
+        8.797373746382426,
+        8.019335270153366,
+        7.97037358686816
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": 0.0,
+      "reciprocal_rank_at_10": 0.0,
+      "labeled_evidence_recall_at_5": 0.0,
+      "combined_evidence_coverage_at_5": 0.0,
+      "split_evidence": 0,
+      "section_precision_at_5": null
+    },
+    {
+      "id": "h-jpm-trading-loss-measure-change",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1119.0-1124.137:t46df0f0b032fb26d",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2124.0-2129.852:t93af24f0eaca3521",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1110.0-1118.92:t5f50a28a2f4ec7ee",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1038.0-1041.466:ta182de40fc944149",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2408.0-2414.3:tac1699bc2229dc39",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b261.0-261.660:t823864588c09e29e",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1057.0-1059.679:t40b8d3adc886c182",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b10.0-12.1544:t08ea5a66a2f4b16d",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b680.0-682.794:t3800917aaa0c960e",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1161.0-1161.3050:tf126c6e4aa08b5a1"
+      ],
+      "scores": [
+        18.0871983466862,
+        14.143898982898424,
+        13.06821786675259,
+        12.53426524554841,
+        12.313385856542462,
+        12.052221131665533,
+        11.265929581537645,
+        10.695692009522554,
+        10.492120496515895,
+        10.29239776392943
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": 0.0,
+      "reciprocal_rank_at_10": 0.0,
+      "labeled_evidence_recall_at_5": 0.0,
+      "combined_evidence_coverage_at_5": 0.0,
+      "split_evidence": 0,
+      "section_precision_at_5": null
+    },
+    {
+      "id": "h-jpm-earnings-at-risk",
+      "kind": "direct",
+      "topic": "risk",
+      "asks_for_amount": true,
+      "citation_ids": [
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1078.0-1078.472:te01473882a886236",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1067.0-1070.101:t4f5551b4c29814e2",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1088.0-1088.1359:t559f934c0f599a36",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1969.0-1969.496:t2b037d5e8670f3bf",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1071.0-1074.235:tb4e94771a6fb16e0",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1081.0-1084.2:ta3a255c0ce013d4b",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1075.0-1077.58:tdd6091bd1334f7a0",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1085.0-1087.619:t7799afa99ff0e85d",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b392.0-392.303:t4729e0189313f7f4",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b734.0-737.224:t243d2cba63d5f3ee"
+      ],
+      "scores": [
+        33.00072487653962,
+        27.82122412803121,
+        26.946773223549478,
+        21.16442039559374,
+        19.92749295871501,
+        16.51689609065344,
+        14.80094332377002,
+        14.133640092502986,
+        14.038024402029013,
+        13.960880699818528
+      ],
+      "relevant_ranks": [
+        1
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": null
+    },
+    {
+      "id": "h-jpm-criticized-wholesale-exposure",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1808.0-1810.3:t2475292ce1747f05",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1723.0-1727.3:tff6c7a02939feef6",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b426.0-426.643:td5e953d3479309d3",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b41.0-43.157:t66f9ce5eb4323add",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2322.0-2330.8:t3084694d2973152d",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b245.0-247.925:tdf694da7eb7bbfb3",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1782.0-1785.165:t3e6001404cc2b6d2",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2051.0-2056.378:t3f63b1ebb2b53e11",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2060.0-2060.505:t8cdd5aff7ea7d0fe",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b468.0-468.2387:t720d3975750fd2af"
+      ],
+      "scores": [
+        10.683228346257172,
+        7.646059173260877,
+        7.140383263377505,
+        6.617099833417887,
+        6.578038772593659,
+        6.089774919613179,
+        5.994175736099788,
+        5.970848203357773,
+        5.927444717674471,
+        5.840420100074519
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": 0.0,
+      "reciprocal_rank_at_10": 0.0,
+      "labeled_evidence_recall_at_5": 0.0,
+      "combined_evidence_coverage_at_5": 0.0,
+      "split_evidence": 0,
+      "section_precision_at_5": null
+    },
+    {
+      "id": "h-jpm-parent-credit-ratings",
+      "kind": "paraphrase",
+      "topic": "risk",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1454.0-1454.1071:t6052ea29283b5c06",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2288.0-2308.221:t82300bf58e0bbc87",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2044.0-2049.222:t35f8f611ab0d1c08",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2038.0-2042.218:t5462693978a1663a",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b511.0-512.188:tbcb77be3f830fd72",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b41.0-43.157:t66f9ce5eb4323add",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b143.0-144.1819:t32d0d63337485ea6",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2051.0-2056.378:t3f63b1ebb2b53e11",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b554.0-555.32:t18c9178338cacf15",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b623.0-626.2:t8d5859fa3015df6a"
+      ],
+      "scores": [
+        20.183284123953598,
+        16.861765184938854,
+        11.90712192503242,
+        10.583715471571455,
+        9.479686333313545,
+        9.396098897876248,
+        8.79528988345399,
+        8.794049942392796,
+        8.645398814520874,
+        8.365779405325169
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": 0.0,
+      "reciprocal_rank_at_10": 0.0,
+      "labeled_evidence_recall_at_5": 0.0,
+      "combined_evidence_coverage_at_5": 0.0,
+      "split_evidence": 0,
+      "section_precision_at_5": null
+    },
+    {
+      "id": "h-jpm-dividend-declared-september",
+      "kind": "direct",
+      "topic": "mda",
+      "asks_for_amount": true,
+      "citation_ids": [
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b681.0-687.134:ta895e2d4ad781edd",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b222.0-223.152:t5092eedcfc25a4a8",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b370.0-374.32:t84033903fc0e8f08",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1999.0-2004.205:t14dcb11f18369786",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1995.0-1997.241:tc7b86646e78972a0",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b422.0-422.1273:t8229d57978513dfa",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b739.0-745.417:ta57ca4fffda3b9d6",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b591.0-593.828:t7d89740ba8cb5940",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b56.0-56.1447:t8b671c290ff339f0",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b19.0-20.175:tfbb12080a62e77a1"
+      ],
+      "scores": [
+        21.946030885921665,
+        19.054403412302133,
+        18.415815994833853,
+        17.06001270870775,
+        16.975129474159097,
+        15.681618931936061,
+        14.263338633463658,
+        14.143907739708279,
+        14.016385537853264,
+        13.834294012816343
+      ],
+      "relevant_ranks": [
+        1
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0,
+      "labeled_evidence_recall_at_5": 0.3333333333333333,
+      "combined_evidence_coverage_at_5": 0.3333333333333333,
+      "split_evidence": 0,
+      "section_precision_at_5": null
+    },
+    {
+      "id": "h-jpm-litigation-loss-range",
+      "kind": "paraphrase",
+      "topic": "accounting",
+      "asks_for_amount": true,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b195.0-195.1332:tb3fa7c30009824a4",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2044.0-2049.222:t35f8f611ab0d1c08",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b189.0-190.182:te45a60ec9cdc539d",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b121.0-122.669:t14d9eb06a4182790",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b117.1867-119.31:ta6d9a2f6b0d15bd1",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b530.0-533.819:tbaedda095df675bd",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b120.0-120.1136:t2c0a89a59218faa8",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1167.0-1173.36:tbd6c4272a6902137",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b38.0-40.834:t13961c92bb352f8b",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b202.0-203.646:ta07af57a7a263ea9"
+      ],
+      "scores": [
+        10.762068401795219,
+        8.962596560738627,
+        8.712335984326216,
+        8.535699294776311,
+        8.452045424007771,
+        8.361524962629657,
+        8.28152309189334,
+        8.21142393575304,
+        7.832484417378579,
+        7.773200334951343
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": 0.0,
+      "reciprocal_rank_at_10": 0.0,
+      "labeled_evidence_recall_at_5": 0.0,
+      "combined_evidence_coverage_at_5": 0.0,
+      "split_evidence": 0,
+      "section_precision_at_5": null
+    },
+    {
+      "id": "h-jpm-goodwill-impairment-test",
+      "kind": "direct",
+      "topic": "accounting",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1948.0-1953.3:t6f87a2180e98e721",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1154.0-1156.127:t2863a486555e246c",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1454.0-1454.1071:t6052ea29283b5c06",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1779.0-1781.3:t54a3dd6f03ea7373",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b620.0-622.506:t6dd0d35e45740001",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b330.0-331.2:te9c1825994860183",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b646.0-653.137:tc9de65302495685e",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1361.0-1361.352:t887c9b083be26bbf",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b734.0-737.224:t243d2cba63d5f3ee",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1945.0-1945.261:t97e0239f598d6cf9"
+      ],
+      "scores": [
+        23.245318606973335,
+        23.13517961436523,
+        12.14270236258131,
+        11.452442356765811,
+        11.033747532947475,
+        10.954528236528624,
+        10.38258990021702,
+        9.555857155514406,
+        9.105960709708834,
+        8.866287718856187
+      ],
+      "relevant_ranks": [
+        1
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0,
+      "labeled_evidence_recall_at_5": 1.0,
+      "combined_evidence_coverage_at_5": 1.0,
+      "split_evidence": 0,
+      "section_precision_at_5": null
+    },
+    {
+      "id": "h-jpm-deposit-growth-sources",
+      "kind": "paraphrase",
+      "topic": "mda",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b157.0-158.488:t18ede933553b54fc",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b264.0-265.615:t675e98895fd4cea1",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b249.1960-252.35:t4fb6a940f357234c",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b152.0-156.32:t9181c42ccfbec671",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b261.0-261.660:t823864588c09e29e",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b259.0-263.483:t7ef0026429c2f0b7",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1829.0-1835.91:t73897130e0342f8d",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1054.0-1055.104:t44550aeb73948435",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b50.0-53.135:t909e620ce09f50ae",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b469.0-471.161:t148c01f4a128d2b6"
+      ],
+      "scores": [
+        14.561140784514272,
+        13.8427493112457,
+        12.806281201896885,
+        12.365460690783658,
+        12.109515248073262,
+        11.975231969898296,
+        11.912325345012803,
+        11.186381009131033,
+        10.900499933752391,
+        10.382380719406106
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": 0.0,
+      "reciprocal_rank_at_10": 0.0,
+      "labeled_evidence_recall_at_5": 0.0,
+      "combined_evidence_coverage_at_5": 0.0,
+      "split_evidence": 0,
+      "section_precision_at_5": null
+    },
+    {
+      "id": "h-unanswerable-apple-store-count",
+      "kind": "unanswerable",
+      "topic": "unanswerable",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b120.0-120.1136:t2c0a89a59218faa8",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b950.0-954.2:t07e76c80e30c36cd",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b45.0-45.443:t92eb818df2de68b6",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b431.0-436.529:tcc8c749abb8f1caf",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b65.0-70.520:t2eb95badec417025",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b76.0-77.727:t737ec416c2ba0706",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b616.0-620.98:t3e0f38aa62dccb88",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b252.0-256.29:t6777ae3dd9110f71",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b177.0-179.32:t88472f21e5e4ee38",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b37.0-38.389:t1ba7da87d6f30de1"
+      ],
+      "scores": [
+        14.755834230427855,
+        14.407263423547723,
+        10.98564646980032,
+        10.901885922660735,
+        10.503089943979216,
+        10.14224953579725,
+        10.092316476783438,
+        9.894808597768773,
+        9.657991479175628,
+        9.59427423028475
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": null,
+      "reciprocal_rank_at_10": null,
+      "labeled_evidence_recall_at_5": null,
+      "combined_evidence_coverage_at_5": null,
+      "split_evidence": 0,
+      "section_precision_at_5": null
+    },
+    {
+      "id": "h-unanswerable-apple-december-guidance",
+      "kind": "unanswerable",
+      "topic": "unanswerable",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b177.0-187.35:t5a4681ad984cef9f",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b163.0-173.368:te104e3d37ec39d54",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b151.0-153.162:t080160a308ee4c87",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b325.0-336.32:t1f2eb1142c710eff",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b311.0-321.32:td4fe33c9bce4bd6b",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b192.0-198.35:t2a39b10b89fac356",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b249.1960-252.35:t4fb6a940f357234c",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b95.0-96.680:td0f99a555619dcbb",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b283.0-301.11:t6a5c0f99effd6428",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b469.0-471.161:t148c01f4a128d2b6"
+      ],
+      "scores": [
+        14.928218032629873,
+        14.332913034265346,
+        10.8749326886736,
+        10.715376480367915,
+        10.228353102506095,
+        10.00106330639083,
+        9.876560871994542,
+        9.851316775877372,
+        9.145931435754822,
+        9.09466409683878
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": null,
+      "reciprocal_rank_at_10": null,
+      "labeled_evidence_recall_at_5": null,
+      "combined_evidence_coverage_at_5": null,
+      "split_evidence": 0,
+      "section_precision_at_5": null
+    },
+    {
+      "id": "h-unanswerable-jpm-cet1-year-end-2026",
+      "kind": "unanswerable",
+      "topic": "unanswerable",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2058.0-2058.631:t67b5e63dda2b78f9",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2044.0-2049.222:t35f8f611ab0d1c08",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2057.0-2057.608:te4fa2afc9aadff88",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b636.0-636.695:t5d1c30085f7fc3cf",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2038.0-2042.218:t5462693978a1663a",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2060.0-2060.505:t8cdd5aff7ea7d0fe",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b697.0-700.129:t55b6dd2076351ba3",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b728.0-728.258:tc0082a7421f7b65f",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b721.0-721.264:t096333b8ea59b711",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b654.0-654.1816:t1785a4d2fe6e8f8b"
+      ],
+      "scores": [
+        25.44725337146336,
+        22.758503291520896,
+        22.244170904197958,
+        22.092972537622796,
+        20.065031970140616,
+        17.475659822839138,
+        17.09220514292778,
+        16.979105364614448,
+        16.9191577997548,
+        16.316390308179734
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": null,
+      "reciprocal_rank_at_10": null,
+      "labeled_evidence_recall_at_5": null,
+      "combined_evidence_coverage_at_5": null,
+      "split_evidence": 0,
+      "section_precision_at_5": null
+    },
+    {
+      "id": "h-unanswerable-jpm-emissions",
+      "kind": "unanswerable",
+      "topic": "unanswerable",
+      "asks_for_amount": false,
+      "citation_ids": [
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1970.0-1971.3:t2997559df79f295f",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2051.0-2056.378:t3f63b1ebb2b53e11",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2060.0-2060.505:t8cdd5aff7ea7d0fe",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2057.0-2057.608:te4fa2afc9aadff88",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b734.0-737.224:t243d2cba63d5f3ee",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2044.0-2049.222:t35f8f611ab0d1c08",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b159.1997-159.2650:tf9ffb20a839b92be",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b307.1964-307.2638:t7789a319e87fde1d",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2038.0-2042.218:t5462693978a1663a",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2058.0-2058.631:t67b5e63dda2b78f9"
+      ],
+      "scores": [
+        6.801129988311289,
+        6.6284211144065885,
+        6.572561169307651,
+        6.3195579383061915,
+        6.2040077164091105,
+        6.018651764428411,
+        5.9624197059734145,
+        5.901404108395217,
+        5.744577476507445,
+        5.7280856988590125
+      ],
+      "relevant_ranks": [],
+      "hit_at_5": null,
+      "reciprocal_rank_at_10": null,
+      "labeled_evidence_recall_at_5": null,
+      "combined_evidence_coverage_at_5": null,
+      "split_evidence": 0,
+      "section_precision_at_5": null
+    }
+  ],
+  "filtered_searches": [
+    {
+      "question_id": "h-aapl-10k-indirect-channel-share",
+      "search": {
+        "section": "Item 1",
+        "form": null,
+        "document": "aapl-10k-2026",
+        "expect_empty": false
+      },
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b76.0-77.727:t737ec416c2ba0706",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b95.0-96.680:td0f99a555619dcbb",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b78.0-81.814:tfe275bf2b6b95d9f",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b62.0-73.129:t5caa676e9c6d6dfd",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b47.0-49.255:teecfabed739d9941",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b97.0-100.327:t9f05c0b443b3075e",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b50.0-61.31:t14d98d1164e7f854",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b74.0-75.784:t58e2f60bc9d98c9f",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b88.0-89.659:te8b247a481a12345",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b103.0-104.1103:t3c68669726d4a3ee"
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0
+    },
+    {
+      "question_id": "h-aapl-10k-agentic-ai-risk",
+      "search": {
+        "section": "Item 1A",
+        "form": null,
+        "document": "aapl-10k-2026",
+        "expect_empty": false
+      },
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b184.0-186.1112:t58683da8109d2646",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b177.0-179.32:t88472f21e5e4ee38",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b189.0-190.182:te45a60ec9cdc539d",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b143.0-144.1819:t32d0d63337485ea6",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b187.0-188.32:t068aa1f6cc5a30af",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b182.0-183.1698:t9bc3ce86df6d51e7",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b194.0-194.1507:tb7b6a7ef10991009",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b200.0-201.1013:t2537ed24f008a8de",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b159.0-160.171:tad1683339f49e47a",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b141.0-141.1923:t4ad46fe34c972863"
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0
+    },
+    {
+      "question_id": "h-aapl-10k-fx-value-at-risk",
+      "search": {
+        "section": "Item 7A",
+        "form": null,
+        "document": "aapl-10k-2026",
+        "expect_empty": false
+      },
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b393.0-396.32:tf18356a4357830e8",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b389.0-391.299:td5ce1d58912d9fe0",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b387.0-388.226:t5a3ffef8d5de3825",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b392.0-392.303:t4729e0189313f7f4"
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0
+    },
+    {
+      "question_id": "h-aapl-10k-unrecognized-tax-benefits",
+      "search": {
+        "section": "Item 8",
+        "form": null,
+        "document": "aapl-10k-2026",
+        "expect_empty": false
+      },
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b550.0-552.163:t465325b4d1d1dfe2",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b640.0-640.823:t8c547cfc1eb63c9c",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b602.0-603.32:t89ee195deadd850b",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b530.0-533.819:tbaedda095df675bd",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b546.0-547.159:taf89324c68e0d489",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b511.0-512.188:tbcb77be3f830fd72",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b566.0-567.82:te531c5f8a919530a",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b650.0-652.505:td07363852491dd76",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b632.0-634.461:t4dc4b0b6efe7bae2",
+        "sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231:x2:p1:b549.0-549.324:tf12ddab9b50475d9"
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0
+    },
+    {
+      "question_id": "h-aapl-10q-accelerated-repurchases",
+      "search": {
+        "section": "Part II, Item 2",
+        "form": null,
+        "document": "aapl-10q-2026-06",
+        "expect_empty": false
+      },
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b284.0-285.576:t872b75b4854b91d5",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b280.0-282.182:t7bc12b9811b305f5",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b283.0-283.640:t4aaa15cee9c074a8"
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0
+    },
+    {
+      "question_id": "h-aapl-10q-greater-china-q3",
+      "search": {
+        "section": "Part I, Item 2",
+        "form": null,
+        "document": "aapl-10q-2026-06",
+        "expect_empty": false
+      },
+      "citation_ids": [
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b163.0-173.368:te104e3d37ec39d54",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b177.0-187.35:t5a4681ad984cef9f",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b151.0-153.162:t080160a308ee4c87",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b192.0-198.35:t2a39b10b89fac356",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b162.0-162.512:te3c2f217fcacf1ab",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b209.0-211.35:t9c714de094491530",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b202.0-205.257:te6f3db15264234a1",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b222.0-223.152:t5092eedcfc25a4a8",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b201.0-201.601:t14f40ede9a5ea399",
+        "sec-psg:0000320193:0000320193-26-000020:aapl-20260627.htm:ec0091f9b26ad65752b086d922e56fe045e5a5b3e962c687bc56eea5a431d0e5:x2:p1:b158.0-159.1996:t22f5aff6e03ad2f0"
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 1.0
+    },
+    {
+      "question_id": "h-jpm-apple-card-transaction",
+      "search": {
+        "section": null,
+        "form": null,
+        "document": "jpm-10q-2026-09",
+        "expect_empty": false
+      },
+      "citation_ids": [
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1134.0-1135.340:t9e24e0e937450269",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1818.0-1828.61:t0af9ae4d1dafdded",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b29.0-36.1:t8e427f5ae35c6241",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2079.0-2082.3:t16b44083865cff75",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1014.0-1018.2:t4bd654f966837e57",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2220.0-2238.284:t813fa6621a940175",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b409.0-412.2:t6b19f7cc4dd30fab",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b2346.0-2356.36:t3c282e4647c5786e",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1846.0-1846.706:t522eaad373c60281",
+        "sec-psg:0000019617:0001628280-26-069523:jpm-20260930.htm:2d3dadea07c09ab8d535867a6d1b9cfa2c833b0ea8abcce4dccfb9a25695045b:x2:p1:b1739.0-1742.70:t0aa7694ca72bdfe5"
+      ],
+      "hit_at_5": 1.0,
+      "reciprocal_rank_at_10": 0.5
+    },
+    {
+      "question_id": "h-jpm-markets-revenue-q3",
+      "search": {
+        "section": "Part I, Item 2",
+        "form": null,
+        "document": "jpm-10q-2026-09",
+        "expect_empty": true
+      },
+      "citation_ids": [],
+      "hit_at_5": null,
+      "reciprocal_rank_at_10": null
+    }
+  ],
+  "citations_verified": 277,
+  "filter_compliance_checked": 57,
+  "timings": {
+    "python": "3.13.5",
+    "platform": "macOS-10.16-x86_64-i386-64bit-Mach-O",
+    "documents": [
+      {
+        "document": "aapl-10k-2026",
+        "blocks": 728,
+        "passages": 302,
+        "load_ms": 4.227390978485346,
+        "extract_ms": 500.83892105612904,
+        "build_passages_ms": 3.7346150493249297
+      },
+      {
+        "document": "aapl-10q-2026-06",
+        "blocks": 304,
+        "passages": 124,
+        "load_ms": 2.9212419176474214,
+        "extract_ms": 310.3895679814741,
+        "build_passages_ms": 1.5294020995497704
+      },
+      {
+        "document": "jpm-10q-2026-09",
+        "blocks": 2509,
+        "passages": 781,
+        "load_ms": 25.86800290737301,
+        "extract_ms": 3788.8316579628736,
+        "build_passages_ms": 10.716210934333503
+      }
+    ],
+    "model_load_ms": null,
+    "index_build_ms": 205.94207290560007,
+    "search": {
+      "count": 800,
+      "mean_ms": 0.9944029204780236,
+      "p50_ms": 1.0242200223729014,
+      "p95_ms": 1.7978070536628366,
+      "max_ms": 3.574553062207997
+    },
+    "verification_ms": 4891.4137239335105,
+    "verification_by_document": [
+      {
+        "document": "aapl-10k-2026",
+        "citations": 112
+      },
+      {
+        "document": "aapl-10q-2026-06",
+        "citations": 47
+      },
+      {
+        "document": "jpm-10q-2026-09",
+        "citations": 118
+      }
+    ]
+  }
+}

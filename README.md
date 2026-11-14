@@ -2,10 +2,12 @@
 
 Enterprise Financial AI Analyst: a financial research copilot over public-company SEC filings.
 
-**Status:** Milestone 2.5 (B3). SEC filing retrieval, caching and extraction, XBRL Company Facts,
-deterministic passages with offline-verifiable citations (verified in batches), in-memory BM25
-keyword search, an offline retrieval-evaluation harness, a real evaluation dataset and its BM25
-baseline. The LLM comes later. See [docs/architecture.md](docs/architecture.md) and
+**Status:** Milestone 2.5 complete. SEC filing retrieval, caching and extraction, XBRL Company
+Facts, deterministic passages with offline-verifiable citations (verified in batches), in-memory
+BM25 keyword search (the default retriever), an offline retrieval-evaluation harness with a
+development set, a held-out set and recorded results. Semantic and hybrid retrieval exist as an
+optional experiment that was evaluated and not adopted. Next is M3: deterministic financial tools
+and a grounded tool-calling agent. See [docs/architecture.md](docs/architecture.md) and
 [docs/decisions.md](docs/decisions.md).
 
 ## Requirements
@@ -170,8 +172,10 @@ uv run python -m financial_analyst.evaluation DATASET.json --output report.json
 # reads filings from data/sec-cache by default (--cache-dir to change); never contacts SEC
 ```
 
-Semantic and hybrid retrieval (an experiment, D-028/D-029) need the optional extra and a
-one-time, hash-verified model install:
+Semantic and hybrid retrieval are an **optional experiment, not adopted**. On the held-out set,
+hybrid matched BM25 on paraphrase questions (8/20 each) and lost a direct question, so BM25 stays
+the default (D-028, D-029; results in `evals/results/`). To reproduce them, install the optional
+extra and the hash-verified model once:
 
 ```bash
 uv sync --extra semantic

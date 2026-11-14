@@ -320,7 +320,8 @@ Improved detection for that format is deliberately not implemented in M2.1.
 - Verifying against the passages the evaluation already built: rejected, because the check would compare the run's output with itself.
 
 ## D-028 Frozen protocol for the BM25 / semantic / hybrid retrieval comparison
-**Status:** Proposed (M2.5 B3, 2026-11-13). Fixed before the held-out dataset is evaluated.
+**Status:** Accepted (owner decision at M2.5 closure, 2026-11-13). The protocol was fixed before the held-out dataset was evaluated.
+**Outcome:** Hybrid not adopted; BM25 remains default.
 **Decision:** Retrieval methods are compared once, on the held-out set `evals/retrieval_v2_heldout.json` (SHA-256 `2d42950ab5ec9e5b6f0fc8069a0ef55c3eb22967e8bb8d2dbb0de5da861eb43c`). The comparison uses the existing harness (D-026, D-027), its 80% relevance rule and its metrics, unchanged.
 - **Configurations (all fixed now):**
   - `bm25`, as in D-025, unchanged.
@@ -337,6 +338,35 @@ Improved detection for that format is deliberately not implemented in M2.1.
   4. Warm query **p95 under 50 ms** on the evaluation machine: the harness's primary-search latency, after one warm-up round, excluding model load and passage embedding.
 - **Reporting:** the configuration, model identity and fingerprints, and embedding fingerprint are recorded in each report. Direct and paraphrase results are reported separately, with counts as well as ratios. Results from the development set are never cited as evidence for adoption.
 
+**Result (M2.5 B4, 2026-11-13).** Held-out dataset: 40 questions, 36 answerable (16 direct, 20 paraphrase), 4 unanswerable.
+
+| | BM25 | Semantic | Hybrid |
+|---|---|---|---|
+| Overall Hit@5 | **23/36** (0.639) | 20/36 (0.556) | 22/36 (0.611) |
+| Direct Hit@5 | **15/16** (0.938) | 10/16 (0.625) | 14/16 (0.875) |
+| Paraphrase Hit@5 | 8/20 (0.400) | **10/20** (0.500) | 8/20 (0.400) |
+| MRR@10 overall / direct / paraphrase | 0.469 / 0.844 / 0.169 | 0.416 / 0.536 / 0.320 | 0.444 / 0.664 / 0.268 |
+| Citations verified | 277/277 | 200/200 | 253/253 |
+| Warm search p95 | 1.80 ms | 17.80 ms | 20.21 ms |
+
+Adoption criteria for hybrid against BM25:
+
+| # | Criterion | Result | Verdict |
+|---|---|---|---|
+| 1 | Paraphrase Hit@5 improves by at least 2 questions | 8/20 → 8/20 | **Fail** |
+| 2 | Direct Hit@5 loses at most 1 question | 15/16 → 14/16 | Pass |
+| 3 | 100% of returned citations verify | 253/253 | Pass |
+| 4 | Warm query p95 under 50 ms | 20.21 ms | Pass |
+
+- **Runs:** six offline runs (each retriever twice), with no network access attempted. Every repeat matched its first run in all non-timing fields.
+- **Integrity:** 100% of returned citations verified in every run. The thresholds, configurations, questions and labels were not changed after the results were seen, and nothing was tuned.
+- **Recorded in each report:** the setup recorded in each report: commit `e534c65`, dataset SHA-256 `2d42950a…3c`, model fingerprint `bd55c16c…e102`, embedding fingerprint `c9e2ba25…d27d`.
+- **Reports** (in the repository):
+  - `evals/results/retrieval_v2_heldout.bm25.json`, SHA-256 `fc10332a78f1ce7f0315b7f3c3e8d72da24a1cd7dc71ee2e40f914943e523c2f`
+  - `evals/results/retrieval_v2_heldout.semantic.json`, SHA-256 `06cae0842329d91dc16af1d85a2f8a557bacb6b8f7e2c01cd4b5a5be059996da`
+  - `evals/results/retrieval_v2_heldout.hybrid.json`, SHA-256 `2c3dca658d3a2b1836dec35a518e1c031a3f29ec30ce7016f00503ddf51ea4e0`
+- **The held-out set is now used.** Any future retrieval configuration needs a new held-out set, written before that configuration is run (D-028 data roles). Evaluation limitations found in this run are listed in architecture §3.2h.
+
 **Why:** with 36 answerable held-out questions, small differences are noise. Fixing the configurations and thresholds before seeing held-out results keeps the comparison from being tuned to the test. The development set already showed how easily one would be tempted: see D-029's limitations.
 
 **Alternatives:**
@@ -345,7 +375,7 @@ Improved detection for that format is deliberately not implemented in M2.1.
 - Adopting on overall Hit@5 alone: rejected, because it hides a direct-question regression behind paraphrase gains.
 
 ## D-029 Local embedding model, runtime and fusion for the retrieval experiment
-**Status:** Proposed (M2.5 B3, 2026-11-13)
+**Status:** Accepted as the record of the configuration tested (M2.5 closure, 2026-11-13). **Not adopted** (D-028): BM25 remains the default retriever. The code remains available as an optional, inactive-by-default experiment (`--retriever semantic|hybrid`, `semantic` extra). No further retrieval tuning was done in M2.5.
 **Decision:** `semantic_retrieval.py` adds `SemanticIndex`, `fuse_rrf` and `HybridIndex` over the existing `Passage` objects. Passages, citation ids and verification are unchanged.
 - **Model:** `BAAI/bge-small-en-v1.5` at commit `5c38ec7c405ec4b44b94cc5a9bb96e735b38267a`, file `onnx/model.onnx` (BAAI's own fp32 export, 133,093,490 bytes, SHA-256 `828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35`, MIT license).
   - It produces 384-dimensional vectors, uses CLS pooling with L2 normalization, and truncates input at 512 tokens.
@@ -390,6 +420,32 @@ Improved detection for that format is deliberately not implemented in M2.1.
 - **Query side:** embeddings know nothing about company or period, so cross-filing competition remains. Filters still solve that.
 - **Query formatting:** queries are embedded without the instruction prefix the model card recommends for short-query retrieval (see the audit above).
 - **Platform:** ONNX Runtime results are reproducible on one machine with fixed threads, but may differ by small amounts across CPUs or builds. The embedding fingerprint shows when they do.
+
+**Held-out assessment (M2.5 B4; see D-028 for the full result).**
+- **Configuration tested:**
+  - `BAAI/bge-small-en-v1.5` @ `5c38ec7c…`, the fp32 `onnx/model.onnx`, through FastEmbed 0.9.1 and ONNX Runtime 1.23.2 on CPU.
+  - CLS pooling, L2 normalization, 512-token truncation, no query prefix.
+  - 1 thread, batch size 32, exact cosine search.
+  - RRF with k = 60 and depth 50, with equal weight for the two rankers.
+- **Semantic retrieval gained on paraphrases but lost on direct questions.**
+  - Paraphrases: Hit@5 rose to 10/20 from BM25's 8/20, and MRR@10 to 0.320 from 0.169. It recovered 5 paraphrase questions BM25 missed (final assembly, iPad decline, services margin, client money, credit ratings) and lost 3 that BM25 found.
+  - Direct questions: Hit@5 fell to 10/16 from BM25's 15/16. It lost questions that turn on exact figures, dates or terms (indirect-channel share, FX value-at-risk, ASU 2023-09, manufacturing obligations, dividend), often by ranking a passage about the right topic from the wrong period first.
+- **RRF didn't keep enough of the semantic gains.** Hybrid kept 2 of the 5 recovered paraphrases (iPad decline, services margin). With equal weights at k = 60, a passage ranked moderately by *both* rankers outscores one ranked first by only one of them. For example, ranks 5 and 10 give 1/65 + 1/70 ≈ 0.030, against 1/61 ≈ 0.016 for a semantic-only first place. So the semantic-only hits were pushed below passages both rankers rated as fair but which didn't contain the evidence. Hybrid also lost 1 direct question and 2 paraphrases that BM25 alone found. The net paraphrase change was 0.
+- **Costs:**
+  - Model load is about 0.9 s.
+  - Embedding all 1,207 passages on one thread takes 331–337 s, so evaluation runs take about 6 minutes instead of 11 s.
+  - Warm query p95 is 18–20 ms, about 10× BM25's but within the 50 ms criterion.
+  - Installing the extra adds about 170 MB of dependencies and 134 MB of model files.
+- **Truncation:** 61 passages exceed 512 tokens (the longest has 1,867), so their tails aren't represented in the embedding.
+- **Query formatting:** queries are embedded without the instruction prefix the model card recommends for short-query retrieval (audit above). The tested configuration therefore isn't the model's recommended usage for this task.
+
+**Why the semantic configuration stays experimental, not rejected outright.** Only *this* configuration failed: no query prefix, 512-token truncation of long passages, and equal-weight RRF at k = 60. The paraphrase gains show the model has a real signal. These are open questions for a future, separately pre-registered experiment, which needs a new held-out set:
+- the recommended query prefix;
+- passages sized to the model's limit;
+- a different fusion design;
+- a different model.
+
+Nothing here rejects semantic or hybrid retrieval in general.
 
 **Alternatives:**
 - FastEmbed's default fp16 file: rejected (provenance; tuned for GPU).
