@@ -70,6 +70,30 @@ questions and prompt injection. They pass the scripted evaluation only.
   that it explains the change, so passages are labeled candidates.
 - Live results vary from run to run; the final verification is two cases.
 
+## Local web interface (Streamlit)
+
+A minimal page for asking a question in the browser and seeing the grounded answer. It needs
+the local `data/sec-cache` and a provider key and model in the environment or `.env` (see
+"Live model" below). Each question sends requests to the provider.
+
+```bash
+uv sync --extra ui                                    # adds Streamlit (optional extra)
+uv run --extra ui streamlit run src/financial_analyst/app.py   # run from the repository root
+```
+
+Then open http://localhost:8501.
+
+**What the page shows:**
+- the grounded status (complete, partial or abstained);
+- the verified figures, change and percentage;
+- a bar chart of the two values;
+- the source filing link, verified quotations, and candidate commentary with citation IDs.
+
+All of these come from the server-rendered answer. The model's own note and explanations, and
+any rejected quotation, are never shown. Missing credentials, a missing cache or a provider
+failure are reported by name, without values. The page runs locally only: no authentication,
+no deployment.
+
 ## Requirements
 
 - Python 3.12+
