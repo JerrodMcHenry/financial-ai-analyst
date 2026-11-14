@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (one-time acquisition of five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) awaiting review. Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal period resolution, exact concept mapping, fact selection) awaiting review. No comparisons or agent yet. Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-13
 
 ---
@@ -735,6 +735,72 @@ identity (financial_tools):  resolve_company(identifier, TickerMap) → CompanyI
 - **Approved rules recorded now, implemented in M3.3 (D-031):**
   1. **Historical fiscal periods** are grounded in actual filing report dates and observation boundaries. The company's `fiscal_year_end` is a consistency check, never the sole authority. SEC's `fy`/`fp` tags never define a period.
   2. **`same_filing` comparisons** select each observation by exact accession, concept, unit and period boundaries. Values from different filings are never mixed silently.
+
+### 3.2j Milestone 3.3 B1: fiscal periods, exact concept mapping and fact selection (awaiting review)
+
+Decisions: D-031 (grounding rules), D-032 (mapping and selection). Code: `financial_tools.py`.
+
+```
+PeriodRequest(kind, fiscal_year, quarter)            fiscal_year | fiscal_quarter (Q1–Q3) | fiscal_year_end | fiscal_quarter_end
+  → resolve_period(request, submissions, facts)      pinned snapshots only; no network; no fy/fp tags
+      FY N:   10-K whose report_date is in calendar year N → period_end
+              start = the single start of that 10-K's own 12-month observations ending then
+              cross-check: start == prior 10-K report_date + 1 day (when that 10-K is listed)
+              cross-check: report_date within 7 days of submissions.fiscal_year_end (never the authority)
+      Q q:    q-th 10-Q after the fiscal-year start; its own 3-month observations must start
+              where the previous quarter ended (Q1 at the fiscal-year start); Q4 never derived
+      → ResolvedPeriod(period_start, period_end, period_class, original_filing, commentary_filing, checks, snapshot SHA-256s)
+  → get_fact(facts, metric, period, policy, accession=None)
+      concept from CONCEPT_MAPPINGS (one exact concept and unit per company and metric; no fallback)
+      latest_filed / original: company_facts.select_fact over every eligible filing
+      same_filing: only observations from the named accession; refused if that filing lacks it
+      → Fact(value: Decimal, observation (accession, form, filed), conflicting_values, other_values,
+             snapshot provenance, fact_key = logical identity, observation_id = immutable identity)
+```
+
+**Four filing roles, kept apart:**
+- **Requested period:** the dates in `ResolvedPeriod`.
+- **Original reporting filing:** the 10-K or 10-Q whose report date is the period end.
+- **Observation source filing:** `Fact.observation`. For example, Apple FY2025 revenue under `latest_filed` comes from the FY2026 10-K, which repeats it.
+- **Commentary filing:** the original reporting filing.
+
+**Verified concept mappings (version 1).** Each value equals the face statement of the cached filing, as tested:
+
+| Company | Metric | Concept (USD) | Statement line | Checked against |
+|---|---|---|---|---|
+| Apple | revenue | `RevenueFromContractWithCustomerExcludingAssessedTax` | Total net sales | FY2026 10-K: 478,834M. Q3 FY2026 10-Q: 109,417M. |
+| Apple | net income | `NetIncomeLoss` | Net income | 132,175M; 29,789M |
+| Apple | total assets | `Assets` (instant) | Total assets | 404,548M; 383,266M |
+| JPMorgan | revenue | `RevenuesNetOfInterestExpense` | Total net revenue | Q3 2026 10-Q: 50,172M |
+| JPMorgan | net income | `NetIncomeLoss` | Net income | 15,305M |
+| JPMorgan | total assets | `Assets` (instant) | Total assets | 5,091,545M |
+
+**The JPMorgan revenue discrepancy, resolved:**
+- Its 10-Ks tag total net revenue with both `Revenues` and `RevenuesNetOfInterestExpense`, with identical values (FY2025: 182,447M).
+- Its 10-Qs have used only `RevenuesNetOfInterestExpense` since 2015, and `Revenues` hasn't appeared in a 10-Q since 2014.
+- `RevenuesNetOfInterestExpense` is therefore the one concept that serves both years and quarters. It is net of interest expense and isn't comparable to an industrial company's revenue.
+
+**Errors (`FinancialDataError.problem`):**
+- `period_not_found`: no such 10-K or 10-Q is listed. Filings are never inferred.
+- `period_ambiguous`: disagreeing starts, a broken quarter chain, two 10-Ks for one year, or a report date far from the fiscal year end.
+- `period_not_supported` (Q4); `period_kind_mismatch`.
+- `metric_not_mapped`; `concept_not_reported`.
+- `observation_not_found`; `observation_ambiguous` (same-day disagreement).
+- `observation_not_in_filing` (`same_filing`).
+- `snapshot_mismatch`; `invalid_request`.
+
+**Unsupported cases and limits in the pinned data:**
+- **JPMorgan:** its submissions snapshot lists only its FY2025 10-K and the three 2026 10-Qs, because prospectuses fill its recent-filings window. JPMorgan periods before FY2025 (including Q3 2025 and FY2024) give `period_not_found`.
+  - Their values still exist in Company Facts.
+  - A `same_filing` read from a later filing that repeats them as comparatives is possible once their exact boundaries are known.
+  - Comparisons are M3.3 B2.
+- **Apple:** its 10-Ks are listed from FY2015, so earlier years give `period_not_found`. FY2015 and other years whose prior 10-K isn't listed resolve without the prior-year-end cross-check, which is recorded in `checks`.
+- **Q4, trailing twelve months, derived values and calendar-year conversion** are not supported.
+- **Fiscal-year labeling** (calendar year of the report date) is the rule for the two supported companies only.
+- **Amendments** are never the original reporting filing; their observations are still eligible for `latest_filed`.
+- **Restatements found in the pinned data:**
+  - Apple: FY2015 total assets were 290,479M in the FY2015 10-K and 290,345M in the FY2016 10-K. The FY2009 net income restatement through a 10-K/A predates the listed 10-Ks.
+  - JPMorgan: 2020 revenue and assets were revised in 2021 filings.
 
 ### 3.3 Later milestone: ingestion
 

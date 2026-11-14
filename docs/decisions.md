@@ -508,3 +508,35 @@ Nothing here rejects semantic or hybrid retrieval in general.
    - If either value is not reported in the required filing, the comparison is refused.
 
 **Why:** these keep requested periods, original reporting filings, observation source filings and commentary filings distinct (the M3.1 design). They also make sure numbers match the filing whose commentary explains them.
+
+## D-032 Exact concept mapping, grounded fiscal periods and explicit fact selection
+**Status:** Proposed (M3.3 B1, 2026-11-14)
+**Decision:** `financial_tools.py` adds `CONCEPT_MAPPINGS` (version 1), `resolve_period` and `get_fact` (architecture §3.2j).
+- **Mapping:** one exact `us-gaap` concept and unit per company and metric, for revenue, net income and total assets at Apple and JPMorgan Chase. Each mapping records the company's statement line and the reason for the choice.
+  - Each was validated against the face financial statements of the cached filings: Apple's FY2026 10-K and Q3 FY2026 10-Q, and JPMorgan's Q3 2026 10-Q.
+  - There is no fallback list and no substitution: a missing concept is an error.
+  - **JPMorgan revenue is `RevenuesNetOfInterestExpense`.** `Revenues` matches it in 10-Ks but hasn't been reported in a 10-Q since 2014.
+- **Periods** follow D-031:
+  - **Fiscal year N** is defined by the 10-K whose report date falls in year N. Its start is the single start of that 10-K's own 12-month observations, checked against the prior 10-K's report date when listed.
+  - **Quarters** are the 10-Qs after the fiscal-year start, chained exactly by their own 3-month observations.
+  - **Instants** take those period ends.
+  - `fiscal_year_end` is a ±7-day consistency check. SEC's `fy`/`fp` tags are never used.
+  - Unlisted filings are never inferred, and Q4 is never derived.
+  - `ResolvedPeriod` keeps the requested period, original reporting filing and commentary filing separate. A fact's source filing is its observation's accession.
+- **Selection policies:**
+  - `latest_filed` and `original` use the existing `select_fact` across eligible filings.
+  - `same_filing` uses only the named accession and is refused when that filing doesn't report the value. Filings are never mixed.
+  - Each `Fact` keeps the Decimal value, the selected observation (accession, form, filed date), conflicting-value indicators and the other values, and the Company Facts snapshot's provenance.
+  - It also carries a logical `fact_key` (company, metric, mapping version, concept, unit, period, policy, required accession) and an immutable `observation_id` (that key plus value, accession, form, filed date and snapshot SHA-256).
+
+**Why:**
+- SEC's `fy`/`fp` tags describe the reporting filing, not the period.
+- Report dates and each filing's own observation boundaries are the only sources that pin exact periods without guessing.
+- One verified concept per metric avoids silently combining different measures.
+- `same_filing` is what makes a comparison's two values match the commentary that explains them.
+
+**Alternatives:**
+- Fiscal periods from `fy`/`fp` or `frame` tags: rejected (D-031).
+- Concept fallback lists: rejected, because they hide that two concepts may measure different things.
+- `us-gaap:Revenues` for JPMorgan: rejected, because it isn't in 10-Qs.
+- Deriving Q4 or missing quarters from year-to-date values: rejected for M3.

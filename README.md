@@ -11,7 +11,10 @@ grounded tool-calling agent) is in progress: immutable, hash-verified snapshots 
 Company Facts and the ticker map, plus exact company identity resolution (M3.2 B1), and five
 snapshots (Apple, JPMorgan Chase, SEC's ticker map) acquired once and pinned in
 `evals/sec_snapshots_v1.json` (M3.2 B2). The raw snapshots stay in the git-ignored cache, so the
-local cache is needed to use them. See [docs/architecture.md](docs/architecture.md) and
+local cache is needed to use them. M3.3 B1 adds fiscal period resolution grounded in filing
+report dates, exact per-company XBRL concepts for revenue, net income and total assets (Apple,
+JPMorgan Chase), and fact selection by explicit policy (`latest_filed`, `original`,
+`same_filing`). Comparisons and the agent come next. See [docs/architecture.md](docs/architecture.md) and
 [docs/decisions.md](docs/decisions.md).
 
 ## Requirements
