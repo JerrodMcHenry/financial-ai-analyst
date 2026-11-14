@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **Next: M3, deterministic financial tools and a grounded tool-calling agent.** Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots and company identity) implemented, awaiting review; no structured data acquired yet. Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-13
 
 ---
@@ -322,7 +322,7 @@ company_facts.select_fact(facts, taxonomy, concept, unit, period_start, period_e
 - **Units must always be named.** Different units and currencies are never combined or converted.
 
 **Limitations.**
-- **Not cached:** Company Facts changes with every filing.
+- **Not cached by `get_company_facts`:** Company Facts changes with every filing. Reproducible work uses immutable snapshots instead (§3.2i, M3.2).
 - **No concept mapping:** "revenue" might be any of several concepts, and series must not be joined across concept changes.
 - **No fiscal-calendar inference and no Q4 derivation.**
 - **Restatements and reclassifications** can't be told apart from this data.
@@ -672,6 +672,50 @@ search(query, filters):  semantic: cosine over the filtered rows → ties as BM2
   - Wrong period: the 10-Q ranked above the 10-K for fiscal-year questions, or the reverse for June-quarter questions (ASU 2023-09 adoption, manufacturing obligations, services margin, control changes).
   - Filtered searches scoped to the right filing hit 7/7 for every retriever. Scoping by company and period, as in M3, addresses this whichever retriever is used.
 
+### 3.2i Milestone 3.2 B1: immutable structured-data snapshots and company identity (awaiting review)
+
+Decisions: D-030 (snapshots and identity), D-031 (approved rules for M3.3). No SEC data has been acquired for M3 yet. The five-request acquisition is M3.2 B2, which needs separate approval.
+
+```
+acquire (network, M3.2 B2):  SecClient.get_snapshot(kind, cik) → exact response bytes + SourceMetadata,
+                             parsed with the live parser first, so an invalid response is never stored
+store (filing_cache.py):     save_snapshot → snapshots/<kind>/<cik|all>/<sha256>.json + <sha256>.meta.json
+                             (each file created atomically, once; never overwritten)
+pin:                         datasets record the full SHA-256 of every snapshot they use
+load (offline):              load_snapshot(kind, sha256, cik) → check metadata + URL + bytes' SHA-256
+                             → load_submissions_snapshot / load_company_facts_snapshot /
+                               load_company_tickers_snapshot (the live client's parsers)
+identity (financial_tools):  resolve_company(identifier, TickerMap) → CompanyIdentity | IdentityError
+```
+
+- **Kinds:** `submissions` and `company_facts` (one company each, keyed by CIK), and `company_tickers` (all companies, `all`).
+- **Immutability:**
+  - Snapshots are content-addressed by the full SHA-256 of the exact bytes.
+  - Saving the same bytes again keeps the first metadata, so the original `retrieved_at` survives.
+  - An entry that fails verification is never overwritten. It raises `SnapshotError` and must be removed by hand.
+  - Files are created as temporary files, then hard-linked into place, which fails rather than replacing an existing file. The bytes are written first and the metadata last, so a half-finished save is an incomplete entry that the next save completes.
+- **Verification on every load:**
+  - the metadata schema, kind and CIK match the request;
+  - the recorded SHA-256 equals the requested one;
+  - the recorded URL equals the canonical URL for that kind and CIK;
+  - the bytes hash to the SHA-256.
+- **Refusals** (`SnapshotError.problem`): `missing` (no complete entry), `corrupted` (bytes absent or wrong), `mismatched` (metadata inconsistent), `invalid` (not a valid response of that kind). Nothing is repaired or refetched implicitly.
+- **Parsing is identical to the live client:** the parsers are now public and shared, with behavior unchanged, and `company_tickers.json` is parsed strictly. Any malformed row rejects the whole map, because a dropped row could hide an ambiguity.
+- **Identity policy (`resolve_company`, against a pinned ticker snapshot only, offline):**
+  - **CIK:** all-ASCII digits, normalized with `normalize_cik`. It is verified by the ticker map when listed there.
+    - **Not listed:** it is verified by a submissions snapshot already loaded through `load_submissions_snapshot` and passed in, whose CIK and canonical URL both match. It is never fetched.
+    - **Verified by neither:** `company_not_found`.
+    - `verified_by` and `source` record which snapshot verified it.
+  - **Ticker:** exact, case-insensitive; surrounding whitespace is ignored.
+  - **Exact alias**, after case-folding and collapsing whitespace only: `apple`, `apple inc.`, `jpmorgan`, `jpmorgan chase`, `jpmorgan chase & co.`.
+  - **No fuzzy, prefix or substring matching.**
+  - All ticker and alias matches are collected. More than one CIK gives `company_ambiguous`, with the candidates.
+  - Tickers and aliases use the ticker map only. No match, or an alias whose CIK isn't in the ticker map, gives `company_not_found`.
+  - Empty, overlong or invalid input gives `invalid_identifier`.
+- **Approved rules recorded now, implemented in M3.3 (D-031):**
+  1. **Historical fiscal periods** are grounded in actual filing report dates and observation boundaries. The company's `fiscal_year_end` is a consistency check, never the sole authority. SEC's `fy`/`fp` tags never define a period.
+  2. **`same_filing` comparisons** select each observation by exact accession, concept, unit and period boundaries. Values from different filings are never mixed silently.
+
 ### 3.3 Later milestone: ingestion
 
 ```
@@ -680,7 +724,7 @@ ticker → CIK (company_tickers.json)
   ├─▶ Company Facts (XBRL JSON) → normalize facts → facts table          [structured path]
   └─▶ primary document (HTML) → clean → split into Items (1A, 7, …)
         → chunk → embed → pgvector, each chunk carrying provenance       [narrative path]
-  primary documents cached on disk (M1.3, §3.2c); mutable JSON caching (submissions, facts) later
+  primary documents cached on disk (M1.3, §3.2c); submissions, facts and tickers as immutable snapshots (M3.2, §3.2i)
 ```
 
 ### 3.4 Later milestone: research question
@@ -770,8 +814,9 @@ class SecClient:
     def get_submissions(self, cik: str | int) -> CompanySubmissions: ...
     def get_filing_document(self, filing: FilingRef) -> FilingDocument: ...   # Milestone 1.1
 
-    # Planned (same private plumbing, no new abstractions):
-    # def get_company_facts(self, cik: str | int) -> CompanyFacts: ...
+    def get_company_facts(self, cik: str | int) -> CompanyFacts: ...          # Milestone 1.4
+    def get_company_tickers(self) -> TickerMap: ...                           # Milestone 3.2
+    def get_snapshot(self, kind: SnapshotKind, cik=None) -> Snapshot: ...     # Milestone 3.2
 
     def close(self) -> None: ...
     def __enter__(self) / __exit__(...)  # context-manager support
@@ -779,6 +824,14 @@ class SecClient:
     # private
     def _get(self, url: str) -> httpx.Response: ...          # pacing + retries + status mapping
     def _get_json(self, url: str) -> tuple[dict, SourceMetadata]: ...
+
+# Module functions shared by the live client and snapshot loading (M3.2):
+def decode_json(content: bytes, url: str) -> dict: ...
+def snapshot_url(kind: SnapshotKind, cik=None) -> str: ...
+def parse_submissions(payload, cik, source) -> CompanySubmissions: ...
+def parse_company_facts(payload, cik, source) -> CompanyFacts: ...
+def parse_company_tickers(payload, source) -> TickerMap: ...
+def parse_snapshot(snapshot: Snapshot) -> CompanySubmissions | CompanyFacts | TickerMap: ...
 ```
 
 Behavior:
@@ -792,7 +845,7 @@ Behavior:
 | Errors | Three classes. `SecError` covers any failure and carries `status_code` (None for timeouts and connection errors). Two subclasses: `SecNotFoundError` (404) and `SecResponseError` (invalid JSON, schema mismatch, or a 200 response that is not plausibly a filing document). Callers never see raw `httpx` exceptions. |
 | Input validation | CIK must be 1–10 digits, then zero-padded to 10. Document requests must be a 10-K/10-Q-family filing whose URL fully matches the EDGAR archive pattern. Anything else raises `ValueError` before any network call. |
 | Redirects | Not followed (httpx default). A 3xx response raises `SecError`, so a request can never be steered to another host. |
-| Caching | Not in `SecClient`. Primary filing documents are cached by `filing_cache.py` (§3.2c, D-020). Submissions are not cached yet. |
+| Caching | Not in `SecClient`. Primary filing documents are cached by `filing_cache.py` (§3.2c, D-020). Submissions, Company Facts and the ticker map are stored as immutable snapshots by `filing_cache.py` (§3.2i, D-030). |
 
 **Why synchronous:** SEC access is rate-limited batch ingestion, so concurrency gains little under a global 4 req/s cap. Sync code is simpler to read, test and debug. If a FastAPI route ever calls it, a plain `def` route runs in FastAPI's threadpool, which the lock handles. Revisit only if profiling shows a need. (Decision D-004.)
 

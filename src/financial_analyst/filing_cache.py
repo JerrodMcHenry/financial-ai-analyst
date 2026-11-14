@@ -1,4 +1,4 @@
-"""Filesystem cache for SEC filing documents.
+"""Filesystem cache for SEC filing documents, and immutable snapshots of SEC JSON data.
 
 Layout, mirroring EDGAR's archive:
     <cache_dir>/filings/<cik>/<accession without dashes>/<primary_document>        exact bytes
@@ -10,20 +10,55 @@ concurrent writers can leave bytes and metadata that do not belong together. Tha
 because every read rebuilds a FilingDocument, whose validator checks the bytes against the
 recorded SHA-256; a mismatched or corrupted entry is treated as a miss, never returned.
 
+Structured-data snapshots (submissions, Company Facts, company_tickers.json) are stored
+differently, because those resources change over time and evaluations must pin one exact
+version (D-030):
+    <cache_dir>/snapshots/<kind>/<cik or "all">/<sha256>.json        exact response bytes
+    <cache_dir>/snapshots/<kind>/<cik or "all">/<sha256>.meta.json   SnapshotMetadata
+They are content-addressed by the full SHA-256 of the bytes, created once and never
+overwritten (a second save of the same bytes keeps the first metadata). Loading needs the
+expected SHA-256 and refuses, with SnapshotError, anything missing, corrupted or
+inconsistent; a snapshot is never repaired or refetched implicitly.
+
 The cache directory must be controlled by this application and not writable by untrusted
 users: the checks here keep paths inside the cache root, but do not defend against an
 attacker who can rewrite the directory itself.
 """
 
 import contextlib
+import hashlib
 import json
 import logging
 import os
+import re
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
+from typing import Literal
 
-from financial_analyst.sec_client import SecClient, filing_document_url
-from financial_analyst.sec_models import FilingDocument, FilingRef
+from pydantic import ValidationError
+
+from financial_analyst.sec_client import (
+    SecClient,
+    SecResponseError,
+    decode_json,
+    filing_document_url,
+    normalize_cik,
+    parse_company_facts,
+    parse_company_tickers,
+    parse_submissions,
+    snapshot_url,
+)
+from financial_analyst.sec_models import (
+    CompanyFacts,
+    CompanySubmissions,
+    FilingDocument,
+    FilingRef,
+    Snapshot,
+    SnapshotKind,
+    SnapshotMetadata,
+    TickerMap,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -120,3 +155,153 @@ def _write_atomically(path: Path, data: bytes) -> None:
         with contextlib.suppress(OSError):
             os.unlink(temp_name)
         raise
+
+
+# --- Immutable structured-data snapshots --------------------------------------------------
+
+SNAPSHOT_SCHEMA_VERSION = 1
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+SnapshotProblem = Literal["missing", "corrupted", "mismatched", "invalid"]
+
+
+class SnapshotError(Exception):
+    """A pinned snapshot cannot be used. `problem` says why:
+    missing: no complete entry for this kind, CIK and SHA-256;
+    corrupted: the stored bytes are absent or do not hash to the SHA-256;
+    mismatched: the metadata disagrees with the request or with the bytes;
+    invalid: the bytes are not a valid response of that kind.
+    """
+
+    def __init__(self, problem: SnapshotProblem, message: str) -> None:
+        super().__init__(message)
+        self.problem = problem
+
+
+def save_snapshot(cache_dir: Path, snapshot: Snapshot) -> SnapshotMetadata:
+    """Store a snapshot once. Returns the metadata now on disk.
+
+    Each file is created atomically and only if it does not exist: bytes first, metadata
+    last, so an entry without metadata is incomplete and is completed by the next save.
+    Saving bytes that are already stored changes nothing and returns the original
+    metadata (first retrieval wins). An existing entry that fails verification is never
+    overwritten: SnapshotError is raised and the entry must be removed by hand.
+    Raises OSError if the files cannot be written.
+    """
+    metadata = snapshot.metadata
+    sha256 = metadata.source.content_sha256
+    content_path, metadata_path = _snapshot_paths(cache_dir, metadata.kind, metadata.cik, sha256)
+    if metadata_path.exists():
+        return load_snapshot(cache_dir, metadata.kind, sha256, metadata.cik).metadata
+    content_path.parent.mkdir(parents=True, exist_ok=True)
+    if not _create_once(content_path, snapshot.content):
+        stored = content_path.read_bytes()
+        if hashlib.sha256(stored).hexdigest() != sha256:
+            raise SnapshotError(
+                "corrupted", f"existing snapshot bytes at {content_path} are corrupted"
+            )
+    document = {"schema_version": SNAPSHOT_SCHEMA_VERSION, **metadata.model_dump(mode="json")}
+    # If a concurrent save of the same bytes created the metadata first, the load below
+    # verifies that file instead.
+    _create_once(metadata_path, json.dumps(document, indent=2).encode())
+    return load_snapshot(cache_dir, metadata.kind, sha256, metadata.cik).metadata
+
+
+def load_snapshot(
+    cache_dir: Path, kind: SnapshotKind, sha256: str, cik: str | int | None = None
+) -> Snapshot:
+    """The stored snapshot with exactly this SHA-256, verified. Raises SnapshotError."""
+    content_path, metadata_path = _snapshot_paths(cache_dir, kind, cik, sha256)
+    label = f"{kind} snapshot {sha256}" + (f" for CIK {normalize_cik(cik)}" if cik else "")
+    try:
+        metadata_bytes = metadata_path.read_bytes()
+    except FileNotFoundError:
+        raise SnapshotError("missing", f"no {label} in {cache_dir}") from None
+    try:
+        document = json.loads(metadata_bytes)
+        if not isinstance(document, dict) or document.pop("schema_version", None) != (
+            SNAPSHOT_SCHEMA_VERSION
+        ):
+            raise ValueError("unsupported snapshot schema version")
+        metadata = SnapshotMetadata.model_validate(document)
+    except (ValueError, ValidationError) as exc:  # includes JSON errors
+        raise SnapshotError("mismatched", f"{label}: unreadable metadata: {exc}") from exc
+    expected_cik = None if cik is None else normalize_cik(cik)
+    if (metadata.kind, metadata.cik) != (kind, expected_cik):
+        raise SnapshotError(
+            "mismatched", f"{label}: metadata is for {metadata.kind} {metadata.cik}"
+        )
+    if metadata.source.content_sha256 != sha256:
+        raise SnapshotError(
+            "mismatched", f"{label}: metadata records {metadata.source.content_sha256}"
+        )
+    if str(metadata.source.source_url) != snapshot_url(kind, cik):
+        raise SnapshotError("mismatched", f"{label}: recorded URL {metadata.source.source_url}")
+    try:
+        content = content_path.read_bytes()
+    except FileNotFoundError:
+        raise SnapshotError("corrupted", f"{label}: the stored bytes are missing") from None
+    actual = hashlib.sha256(content).hexdigest()
+    if actual != sha256:
+        raise SnapshotError("corrupted", f"{label}: the stored bytes are corrupted (hash {actual})")
+    return Snapshot(metadata=metadata, content=content)
+
+
+def load_submissions_snapshot(cache_dir: Path, cik: str | int, sha256: str) -> CompanySubmissions:
+    """A verified submissions snapshot, parsed exactly as SecClient.get_submissions parses."""
+    snapshot = load_snapshot(cache_dir, "submissions", sha256, cik)
+    return _parsed(snapshot, lambda payload, m: parse_submissions(payload, m.cik, m.source))
+
+
+def load_company_facts_snapshot(cache_dir: Path, cik: str | int, sha256: str) -> CompanyFacts:
+    """A verified Company Facts snapshot, parsed exactly as SecClient.get_company_facts."""
+    snapshot = load_snapshot(cache_dir, "company_facts", sha256, cik)
+    return _parsed(snapshot, lambda payload, m: parse_company_facts(payload, m.cik, m.source))
+
+
+def load_company_tickers_snapshot(cache_dir: Path, sha256: str) -> TickerMap:
+    """A verified company_tickers.json snapshot, parsed as SecClient.get_company_tickers."""
+    snapshot = load_snapshot(cache_dir, "company_tickers", sha256)
+    return _parsed(snapshot, lambda payload, m: parse_company_tickers(payload, m.source))
+
+
+def _parsed[T](snapshot: Snapshot, parse: Callable[[dict, SnapshotMetadata], T]) -> T:
+    """Parse verified snapshot bytes with the live client's own validation."""
+    metadata = snapshot.metadata
+    try:
+        return parse(decode_json(snapshot.content, str(metadata.source.source_url)), metadata)
+    except SecResponseError as exc:
+        raise SnapshotError("invalid", f"{metadata.kind} snapshot: {exc}") from exc
+
+
+def _snapshot_paths(
+    cache_dir: Path, kind: SnapshotKind, cik: str | int | None, sha256: str
+) -> tuple[Path, Path]:
+    """Paths for a snapshot. Raises ValueError for anything unsafe, before touching files."""
+    snapshot_url(kind, cik)  # validates the kind and the CIK rules
+    if not isinstance(sha256, str) or not _SHA256.fullmatch(sha256):
+        raise ValueError(f"a snapshot is identified by a full lowercase SHA-256, got {sha256!r}")
+    root = cache_dir.resolve()
+    folder = root / "snapshots" / kind / ("all" if cik is None else normalize_cik(cik))
+    content_path = (folder / f"{sha256}.json").resolve()
+    if not content_path.is_relative_to(root):
+        raise ValueError(f"Snapshot path escapes the cache directory: {content_path}")
+    return content_path, content_path.with_name(f"{sha256}.meta.json")
+
+
+def _create_once(path: Path, data: bytes) -> bool:
+    """Atomically create `path` with `data` unless it already exists. Returns False if it
+    existed. The data is written to a temporary file first, then hard-linked into place,
+    which fails rather than replacing an existing file."""
+    fd, temp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as temp_file:
+            temp_file.write(data)
+        try:
+            os.link(temp_name, path)
+        except FileExistsError:
+            return False
+        return True
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(temp_name)

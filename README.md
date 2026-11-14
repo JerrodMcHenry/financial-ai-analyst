@@ -6,8 +6,10 @@ Enterprise Financial AI Analyst: a financial research copilot over public-compan
 Facts, deterministic passages with offline-verifiable citations (verified in batches), in-memory
 BM25 keyword search (the default retriever), an offline retrieval-evaluation harness with a
 development set, a held-out set and recorded results. Semantic and hybrid retrieval exist as an
-optional experiment that was evaluated and not adopted. Next is M3: deterministic financial tools
-and a grounded tool-calling agent. See [docs/architecture.md](docs/architecture.md) and
+optional experiment that was evaluated and not adopted. M3 (deterministic financial tools and a
+grounded tool-calling agent) is in progress: immutable, hash-verified snapshots for submissions,
+Company Facts and the ticker map, plus exact company identity resolution (M3.2 B1). No structured
+data snapshots have been acquired yet. See [docs/architecture.md](docs/architecture.md) and
 [docs/decisions.md](docs/decisions.md).
 
 ## Requirements

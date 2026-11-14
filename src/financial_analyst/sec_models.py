@@ -3,6 +3,7 @@
 import hashlib
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import (
     AwareDatetime,
@@ -165,4 +166,64 @@ class CompanyFacts(BaseModel):
     observations: list[FactObservation]  # every valid row, in SEC's order
     skipped_count: int  # total malformed rows not loaded
     skipped_sample: list[SkippedObservation]  # the first few, for diagnosis
+    source: SourceMetadata
+
+
+# --- Structured-data snapshots (M3.2) ----------------------------------------------------
+
+# The SEC JSON resources that are stored as immutable snapshots.
+SnapshotKind = Literal["submissions", "company_facts", "company_tickers"]
+
+
+class SnapshotMetadata(BaseModel):
+    """Provenance of one stored SEC JSON response. Never changes once written."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: SnapshotKind
+    cik: str | None = Field(pattern=r"^\d{10}$")  # None only for company_tickers (all companies)
+    source: SourceMetadata  # URL, original retrieved_at, HTTP status, full SHA-256 of the bytes
+
+    @model_validator(mode="after")
+    def _check_cik(self) -> "SnapshotMetadata":
+        if (self.kind == "company_tickers") != (self.cik is None):
+            raise ValueError("company_tickers snapshots have no CIK; every other kind needs one")
+        return self
+
+
+class Snapshot(BaseModel):
+    """The exact bytes of one SEC JSON response, with its metadata.
+
+    The bytes are kept as served (after HTTP decompression), never re-serialized, so the
+    SHA-256 identifies exactly what SEC returned.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    metadata: SnapshotMetadata
+    content: bytes = Field(repr=False)
+
+    @model_validator(mode="after")
+    def _check_hash(self) -> "Snapshot":
+        if hashlib.sha256(self.content).hexdigest() != self.metadata.source.content_sha256:
+            raise ValueError("content does not match its SHA-256 hash")
+        return self
+
+
+class TickerEntry(BaseModel):
+    """One row of SEC's company_tickers.json."""
+
+    model_config = ConfigDict(frozen=True)
+
+    cik: str = Field(pattern=r"^\d{10}$")
+    ticker: str = Field(min_length=1)  # exactly as SEC lists it
+    title: str  # SEC's company title, e.g. "Apple Inc."
+
+
+class TickerMap(BaseModel):
+    """SEC's ticker-to-CIK mapping, in SEC's order. A ticker can appear more than once."""
+
+    model_config = ConfigDict(frozen=True)
+
+    entries: list[TickerEntry]
     source: SourceMetadata

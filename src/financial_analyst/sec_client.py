@@ -27,13 +27,19 @@ from financial_analyst.sec_models import (
     FilingDocument,
     FilingRef,
     SkippedObservation,
+    Snapshot,
+    SnapshotKind,
+    SnapshotMetadata,
     SourceMetadata,
+    TickerEntry,
+    TickerMap,
 )
 
 logger = logging.getLogger(__name__)
 
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
 COMPANY_FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+COMPANY_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 MAX_SKIPPED_SAMPLE = 20
 
 CONNECT_TIMEOUT_SECONDS = 5.0
@@ -111,7 +117,7 @@ class SecClient:
         """Fetch a company's profile and recent filings."""
         cik = normalize_cik(cik)
         payload, source = self._get_json(SUBMISSIONS_URL.format(cik=cik))
-        return _parse_submissions(payload, cik, source)
+        return parse_submissions(payload, cik, source)
 
     def get_filing_document(self, filing: FilingRef) -> FilingDocument:
         """Download a filing's primary HTML document, keeping the exact response bytes."""
@@ -126,18 +132,32 @@ class SecClient:
         """Fetch every XBRL fact SEC publishes for a company. Not cached: it changes over time."""
         cik = normalize_cik(cik)
         payload, source = self._get_json(COMPANY_FACTS_URL.format(cik=cik))
-        return _parse_company_facts(payload, cik, source)
+        return parse_company_facts(payload, cik, source)
+
+    def get_company_tickers(self) -> TickerMap:
+        """Fetch SEC's ticker-to-CIK mapping (company_tickers.json)."""
+        payload, source = self._get_json(COMPANY_TICKERS_URL)
+        return parse_company_tickers(payload, source)
+
+    def get_snapshot(self, kind: SnapshotKind, cik: str | int | None = None) -> Snapshot:
+        """Fetch one SEC JSON resource as an immutable snapshot: its exact bytes plus
+        provenance. The response must parse exactly as get_submissions, get_company_facts
+        or get_company_tickers would parse it, so an invalid response is never stored."""
+        url = snapshot_url(kind, cik)
+        response = self._get(url)
+        source = _source_metadata(url, response)
+        snapshot = Snapshot(
+            metadata=SnapshotMetadata(
+                kind=kind, cik=None if cik is None else normalize_cik(cik), source=source
+            ),
+            content=response.content,
+        )
+        parse_snapshot(snapshot)  # raises SecResponseError if it is not a valid response
+        return snapshot
 
     def _get_json(self, url: str) -> tuple[dict[str, Any], SourceMetadata]:
         response = self._get(url)
-        try:
-            # parse_float=Decimal keeps reported numbers exact; floats never enter values.
-            payload = json.loads(response.content, parse_float=Decimal)
-        except ValueError as exc:
-            raise SecResponseError(f"Invalid JSON from {url}") from exc
-        if not isinstance(payload, dict):
-            raise SecResponseError(f"Expected a JSON object from {url}")
-        return payload, _source_metadata(url, response)
+        return decode_json(response.content, url), _source_metadata(url, response)
 
     def _get(self, url: str) -> httpx.Response:
         """GET with pacing and bounded retries; raises SecError on failure."""
@@ -192,6 +212,45 @@ def _source_metadata(url: str, response: httpx.Response) -> SourceMetadata:
     )
 
 
+def decode_json(content: bytes, url: str) -> dict[str, Any]:
+    """Decode an SEC JSON response body. Raises SecResponseError unless it is an object."""
+    try:
+        # parse_float=Decimal keeps reported numbers exact; floats never enter values.
+        payload = json.loads(content, parse_float=Decimal)
+    except ValueError as exc:
+        raise SecResponseError(f"Invalid JSON from {url}") from exc
+    if not isinstance(payload, dict):
+        raise SecResponseError(f"Expected a JSON object from {url}")
+    return payload
+
+
+def snapshot_url(kind: SnapshotKind, cik: str | int | None = None) -> str:
+    """The URL a snapshot of `kind` comes from. Raises ValueError before any request for an
+    unknown kind, an invalid CIK, or a CIK given (or missing) where it does not belong."""
+    if kind == "company_tickers":
+        if cik is not None:
+            raise ValueError("company_tickers covers all companies; no CIK is accepted")
+        return COMPANY_TICKERS_URL
+    if cik is None:
+        raise ValueError(f"a {kind} snapshot needs a CIK")
+    if kind == "submissions":
+        return SUBMISSIONS_URL.format(cik=normalize_cik(cik))
+    if kind == "company_facts":
+        return COMPANY_FACTS_URL.format(cik=normalize_cik(cik))
+    raise ValueError(f"unknown snapshot kind {kind!r}")
+
+
+def parse_snapshot(snapshot: Snapshot) -> CompanySubmissions | CompanyFacts | TickerMap:
+    """Parse a snapshot's bytes with the same validation the live client uses."""
+    metadata = snapshot.metadata
+    payload = decode_json(snapshot.content, str(metadata.source.source_url))
+    if metadata.kind == "submissions":
+        return parse_submissions(payload, metadata.cik, metadata.source)
+    if metadata.kind == "company_facts":
+        return parse_company_facts(payload, metadata.cik, metadata.source)
+    return parse_company_tickers(payload, metadata.source)
+
+
 def filing_document_url(filing: FilingRef) -> str:
     """Return the filing's archive URL, or raise ValueError before any request is sent."""
     if filing.form not in DOCUMENT_FORMS:
@@ -239,7 +298,7 @@ def _parse_retry_after(value: str | None) -> float | None:
         return None
 
 
-def _parse_submissions(
+def parse_submissions(
     payload: dict[str, Any], cik: str, source: SourceMetadata
 ) -> CompanySubmissions:
     """Convert EDGAR's submissions JSON into typed records.
@@ -301,7 +360,7 @@ def _parse_submissions(
         raise SecResponseError(f"Malformed submissions response for CIK {cik}: {exc}") from exc
 
 
-def _parse_company_facts(payload: dict[str, Any], cik: str, source: SourceMetadata) -> CompanyFacts:
+def parse_company_facts(payload: dict[str, Any], cik: str, source: SourceMetadata) -> CompanyFacts:
     """Convert facts[taxonomy][concept]["units"][unit] = [rows] into typed records.
 
     The overall structure must be valid or the whole response is rejected. Individual
@@ -366,6 +425,25 @@ def _parse_company_facts(payload: dict[str, Any], cik: str, source: SourceMetada
         skipped_sample=skipped,
         source=source,
     )
+
+
+def parse_company_tickers(payload: dict[str, Any], source: SourceMetadata) -> TickerMap:
+    """Convert company_tickers.json ({"0": {"cik_str", "ticker", "title"}, ...}) into a TickerMap.
+
+    Strict: any malformed row rejects the whole mapping, because a silently dropped row
+    could turn an ambiguous ticker into an apparently unique one.
+    """
+    try:
+        rows = sorted(payload.items(), key=lambda item: int(item[0]))  # SEC's numbered order
+        entries = [
+            TickerEntry(cik=normalize_cik(row["cik_str"]), ticker=row["ticker"], title=row["title"])
+            for _, row in rows
+        ]
+    except (KeyError, TypeError, ValueError, ValidationError) as exc:
+        raise SecResponseError(f"Malformed company_tickers response: {exc}") from exc
+    if not entries:
+        raise SecResponseError("company_tickers response lists no companies")
+    return TickerMap(entries=entries, source=source)
 
 
 def _parse_fact_row(cik: str, taxonomy: str, concept: str, unit: str, row: Any) -> FactObservation:

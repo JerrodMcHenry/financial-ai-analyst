@@ -453,3 +453,54 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - Hosted embeddings: rejected (needs network access and a key, and the model can change without notice).
 - pgvector or FAISS: unnecessary at this size.
 - Calling onnxruntime directly without FastEmbed: possible, about 40 lines. The owner chose FastEmbed, and its output matched this direct pipeline exactly in a check.
+
+## D-030 Immutable structured-data snapshots and exact company identity
+**Status:** Proposed (M3.2 B1, 2026-11-13; implements the approved M3.1 design)
+**Decision:**
+- **What is stored:** SEC submissions, Company Facts and `company_tickers.json` responses, as immutable snapshots in the existing git-ignored cache (`filing_cache.py`, architecture §3.2i).
+  - Content-addressed by the full SHA-256 of the exact response bytes.
+  - Metadata (`SnapshotMetadata`: kind, CIK, `SourceMetadata`) is stored beside them.
+  - Each file is created atomically and only once, and never overwritten.
+- **Loading:** a load names kind, CIK and SHA-256, and verifies metadata, the canonical URL and the bytes' hash. It refuses with `SnapshotError` (`missing`, `corrupted`, `mismatched`, `invalid`) and never repairs or refetches.
+- **Parsing:** snapshots are parsed by the live client's own parsers, now public and unchanged in behavior.
+- **Fetching:** `SecClient.get_snapshot` fetches a snapshot and refuses one that doesn't parse.
+- **Identity:** companies are resolved only against pinned, already-loaded snapshots:
+  - by CIK, by exact case-insensitive ticker, or by a fixed exact alias map for Apple and JPMorgan Chase;
+  - no fuzzy matching;
+  - any identifier matching more than one CIK is rejected as ambiguous.
+- **CIK verification (owner correction, 2026-11-13):** a CIK isn't required to appear in the ticker map.
+  - **Listed in the ticker map:** resolved and verified by it, as before.
+  - **Not listed:** verified by a submissions snapshot the caller has already loaded through `load_submissions_snapshot`. It verifies only if its record's CIK *and* its canonical source URL both match the requested CIK.
+  - **Never fetched:** identity resolution never downloads submissions.
+  - **Verified by neither:** `company_not_found`.
+  - **Tickers and aliases:** use the ticker map only.
+  - `CompanyIdentity.verified_by` (`company_tickers` | `submissions`) and `source` record which snapshot verified the company.
+- **Kept decisions (owner-confirmed):**
+  - saving identical bytes again keeps the first retrieval's metadata;
+  - one malformed ticker-map row rejects the whole snapshot;
+  - hard-link creation is acceptable on the supported filesystems;
+  - snapshot SHA-256 pins are recorded in M3.2 B2.
+
+**Why:**
+- Submissions and Company Facts change over time, so reproducible financial answers and evaluations need one exact, verifiable version.
+- Content addressing makes that version's identity its hash.
+- Create-once writes mean a pinned snapshot can't silently change.
+- Exact identity matching avoids wrong-company answers, which are worse than a refusal.
+
+**Alternatives:**
+- Overwriting a per-company "latest" file: rejected, because pins would drift.
+- Caching parsed objects: rejected, because re-serialization changes bytes and loses provenance.
+- Silently refetching on a bad snapshot: rejected, because evaluations must fail loudly.
+- Fuzzy name matching: rejected for the first release.
+
+## D-031 Grounding rules for fiscal periods and same-filing comparisons (for M3.3)
+**Status:** Accepted (owner corrections to the M3.1 design, 2026-11-13). To be implemented in M3.3; nothing implements them yet.
+**Decision:**
+1. **Historical fiscal periods are grounded in actual filing report dates and observation period boundaries.**
+   - A company's `fiscal_year_end` (submissions) is a consistency check, not the sole authority.
+   - SEC's Company Facts `fy`/`fp` tags describe the reporting filing and never define an observation's economic period.
+2. **`same_filing` comparisons select each observation by exact accession number, concept, unit and period boundaries.**
+   - Values from different filings are never mixed silently.
+   - If either value is not reported in the required filing, the comparison is refused.
+
+**Why:** these keep requested periods, original reporting filings, observation source filings and commentary filings distinct (the M3.1 design). They also make sure numbers match the filing whose commentary explains them.

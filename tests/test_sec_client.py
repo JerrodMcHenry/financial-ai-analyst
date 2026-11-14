@@ -302,3 +302,83 @@ def test_filing_document_rejects_content_that_does_not_match_its_hash(settings):
 
     with pytest.raises(ValidationError):
         FilingDocument(filing=document.filing, content=b"tampered", source=document.source)
+
+
+# --- Company tickers and snapshots (M3.2) -------------------------------------------------
+
+TICKERS_FIXTURE = Path(__file__).parent / "fixtures" / "company_tickers_sample.json"
+
+
+def test_get_company_tickers_parses_every_row_in_sec_order(settings):
+    client, requests = make_client(
+        settings, [httpx.Response(200, content=TICKERS_FIXTURE.read_bytes())]
+    )
+    with client:
+        tickers = client.get_company_tickers()
+    assert str(requests[0].url) == sec_client.COMPANY_TICKERS_URL
+    assert [(e.cik, e.ticker) for e in tickers.entries][:3] == [
+        ("0000320193", "AAPL"),
+        ("0000019617", "JPM"),
+        ("0000019617", "JPM-PC"),
+    ]
+    assert tickers.source.content_sha256 == hashlib.sha256(TICKERS_FIXTURE.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},  # no companies
+        {"0": {"cik_str": 320193, "title": "Apple Inc."}},  # missing ticker
+        {"0": {"cik_str": "Apple", "ticker": "AAPL", "title": "Apple Inc."}},  # bad CIK
+        {"0": {"cik_str": True, "ticker": "AAPL", "title": "Apple Inc."}},
+        {"0": {"cik_str": 320193, "ticker": "", "title": "Apple Inc."}},
+        {"x": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."}},  # non-numeric key
+    ],
+)
+def test_a_malformed_ticker_mapping_is_rejected_whole(settings, payload):
+    client, _ = make_client(settings, [httpx.Response(200, content=json.dumps(payload).encode())])
+    with client, pytest.raises(SecResponseError):
+        client.get_company_tickers()
+
+
+@pytest.mark.parametrize(
+    ("kind", "cik", "url", "fixture"),
+    [
+        ("submissions", "320193", APPLE_URL, FIXTURE),
+        ("company_tickers", None, sec_client.COMPANY_TICKERS_URL, TICKERS_FIXTURE),
+    ],
+)
+def test_get_snapshot_keeps_the_exact_bytes_and_provenance(settings, kind, cik, url, fixture):
+    body = fixture.read_bytes()
+    client, requests = make_client(settings, [httpx.Response(200, content=body)])
+    with client:
+        snapshot = client.get_snapshot(kind, cik)
+    assert str(requests[0].url) == url
+    assert snapshot.content == body
+    assert snapshot.metadata.kind == kind
+    assert snapshot.metadata.cik == (None if cik is None else "0000320193")
+    assert str(snapshot.metadata.source.source_url) == url
+    assert snapshot.metadata.source.content_sha256 == hashlib.sha256(body).hexdigest()
+
+
+@pytest.mark.parametrize("body", [b"not json", b"[]", b'{"cik": "320193"}'])
+def test_get_snapshot_refuses_a_response_that_does_not_parse(settings, body):
+    client, _ = make_client(settings, [httpx.Response(200, content=body)])
+    with client, pytest.raises(SecResponseError):
+        client.get_snapshot("submissions", "320193")
+
+
+@pytest.mark.parametrize(
+    ("kind", "cik"),
+    [
+        ("company_tickers", "320193"),
+        ("submissions", None),
+        ("company_facts", "abc"),
+        ("other", "1"),
+    ],
+)
+def test_get_snapshot_rejects_bad_requests_before_sending(settings, kind, cik):
+    client, requests = make_client(settings, [])
+    with client, pytest.raises(ValueError):
+        client.get_snapshot(kind, cik)
+    assert requests == []
