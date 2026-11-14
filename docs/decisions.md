@@ -589,7 +589,7 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - Semantic retrieval: not adopted (D-028); BM25 stays the default.
 
 ## D-035 Provider-independent tool-calling loop with structured, unvalidated drafts
-**Status:** Proposed (M3.5 B1, 2026-11-14)
+**Status:** Accepted (M3.5 B1, 2026-11-14)
 **Decision:** `agent.py` runs a bounded tool-calling loop against a one-method model interface, `complete(messages, tools) -> ModelTurn`, tested with a scripted fake model (architecture §3.2m).
 - **Tools:** five narrow adapters over existing code (`resolve_company`, `get_fact`, `compare`, `commentary_filing`, `search_commentary`). Arguments are strict pydantic schemas with no extra fields. No tool accepts a path, URL or data source; comparisons are referenced by a `comparison_id` from the same run.
 - **Errors:** tool-side problems (unknown tool, malformed arguments, unsupported company or metric, unresolvable period, unexpected exception) are returned to the model as structured errors. Model-side problems (exception, malformed turn) end the run.
@@ -606,3 +606,24 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - An agent framework: rejected (no new dependency; the loop is about 80 lines).
 - Letting the model write numbers into the answer and checking them later by text matching: rejected for B1 drafts, because placeholders are exact and cheaper to validate.
 - A fake agent returning canned answers: rejected, because it would not exercise tool selection, validation or limits.
+
+## D-036 Deterministic grounding: publish only what can be checked mechanically
+**Status:** Proposed (M3.5 B2, 2026-11-14)
+**Decision:** a draft becomes an answer only through `grounding.validate_draft` and `render_answer` (architecture §3.2n).
+- **Evidence:** the validator checks the draft against `RunEvidence`, the typed objects this run's successful tool calls produced. It never uses the model's account of tool results.
+- **Numbers:** every placeholder must map to a `value_id` produced in this run for the answer's subject comparison (same company, metric and periods). The narrative may contain no digits. Any failure means the answer abstains.
+- **Citations:** each must be a verified passage from this run's search of the subject's commentary filing, whose cached bytes still hash to the cited source and whose ID still describes its text (full rebuild optional). Failures drop the item, and the answer is at most partial.
+- **Quotations:** at most 3, of 300 characters each. Each must be an exact substring of a grounded passage. Management attribution is allowed only for MD&A passages.
+- **Published content:** only the server-rendered statement and figures with provenance, verified attributed quotations, and candidate commentary. The model's wording and explanations are withheld, with reasons.
+- **Status:** abstained (no valid draft or subject, or any numeric problem), partial (valid figures, no or rejected commentary), complete (valid figures, at least one grounded citation, no issues).
+- **Evaluation:** a labeled scripted-model set (26 cases) measures the pipeline, not LLM reasoning.
+
+**Why:**
+- Numbers and quotations can be checked exactly, so they are. Causes and relevance cannot be, so they are not published, rather than being approximated with keywords.
+- Server-side rendering means a model cannot misformat, misattribute or relabel a figure, even when it follows injected instructions.
+- Rejecting the whole answer on any numeric problem treats a fabricated number as evidence the draft is unreliable. A bad citation only removes that citation, because the figures are independently verified.
+
+**Alternatives:**
+- Publishing the model's sentence with server-filled numbers: rejected for now, because the words around a correct number can still misstate direction or cause.
+- Keyword-based causal-claim detection: rejected; it can't establish entailment and invites false confidence.
+- Re-running full citation verification on every answer: optional (`full_reverify`). The run already verified each passage in the same process, and the cheap checks catch changed bytes and altered text.

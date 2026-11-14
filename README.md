@@ -19,7 +19,9 @@ Decimal delta, and a percentage shown only for a positive base, with restatement
 separately. M3.4 joins them with BM25 retrieval into one evidence-backed analysis result
 (numbers from the comparison, verified candidate commentary from the same filing, no LLM). M3.5
 B1 adds a provider-independent tool-calling loop, tested with a scripted fake model, that
-produces unvalidated answer drafts. A live model and draft validation come next. See [docs/architecture.md](docs/architecture.md) and
+produces unvalidated answer drafts. M3.5 B2 validates those drafts deterministically and renders
+the published answer on the server (complete, partial or abstained), with a 26-case offline
+evaluation. A live model comes next (M3.6). See [docs/architecture.md](docs/architecture.md) and
 [docs/decisions.md](docs/decisions.md).
 
 ## Requirements
@@ -297,3 +299,29 @@ one repair of a malformed draft. A draft refers to numbers only through tool `va
 to passages through citation ids, and is always labeled `unvalidated_draft`: checking it and
 rendering a verified answer is M3.5 B2. No live model is connected. Details:
 [docs/architecture.md](docs/architecture.md) §3.2m.
+
+## Grounded answers and the agent evaluation
+
+```python
+from financial_analyst.grounding import ground
+
+answer = ground(outcome, data=data, cache_dir=cache)  # outcome from run_agent
+print(answer.status, answer.statement)
+for quote in answer.quotations:
+    print(quote.attribution, quote.text)
+```
+
+`ground` checks a draft only against what the run's own tools produced. Every value must
+come from this run's comparison for the same company, metric and periods, and the narrative
+may contain no digits. Every citation must be a verified passage from that comparison's
+filing, and every quotation must be an exact substring of one. The published answer is
+rendered by the server: figures and provenance, verified quotations, and candidate
+commentary. The model's own wording and explanations are withheld, because causes can't be
+verified mechanically. Details: [docs/architecture.md](docs/architecture.md) §3.2n.
+
+```bash
+uv run python -m financial_analyst.agent_eval    # 26 labeled cases, scripted models, offline
+```
+
+The evaluation tests the pipeline under fixed model behaviors (good, bad and adversarial).
+It does not measure how a real LLM reasons.

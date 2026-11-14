@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal periods, concept mapping, fact selection) committed; M3.3 B2 (deterministic same-filing comparisons and percentage change) approved; M3.4 (evidence-backed analysis: comparison plus verified candidate commentary, no LLM) committed; M3.5 B1 (provider-independent tool-calling orchestration with a scripted fake model; unvalidated drafts) awaiting review. No live LLM provider yet. Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal periods, concept mapping, fact selection) committed; M3.3 B2 (deterministic same-filing comparisons and percentage change) approved; M3.4 (evidence-backed analysis: comparison plus verified candidate commentary, no LLM) committed; M3.5 B1 (provider-independent tool-calling orchestration with a scripted fake model) committed; M3.5 B2 (deterministic grounding, server-rendered answers, offline agent evaluation) awaiting review. No live LLM provider yet. Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-14
 
 ---
@@ -922,7 +922,7 @@ explain_change(identifier, metric, current_period, prior_period, query=None, *, 
 - Only same-filing comparisons and the six mapped metrics are supported. The filing must already be cached; nothing is fetched.
 - Next: the M3 LLM tool-calling agent, which may propose these tool calls and draft prose, with every number checked against the `Comparison` and every citation against this result's verified evidence.
 
-### 3.2m Milestone 3.5 B1: tool-calling orchestration with a scripted model (awaiting review)
+### 3.2m Milestone 3.5 B1: tool-calling orchestration with a scripted model (approved)
 
 Decision: D-035. Code: `agent.py` (one new module). `analysis._commentary` became the public `retrieve_commentary` so the search tool reuses it; nothing else in `analysis.py` or `financial_tools.py` changed.
 
@@ -971,6 +971,110 @@ A draft is always labeled `draft_label: "unvalidated_draft"` with a fixed notice
 **Scripted runs (pinned data):**
 - Apple FY2026 revenue: `resolve_company` → `compare` → `commentary_filing` + `search_commentary` → draft; 4 calls, 4 turns. Values 478,834,000,000 and 416,161,000,000, delta 62,673,000,000, 15.1%; candidates from 10-K Item 7.
 - JPMorgan Q3 2026 net income: `resolve_company` → `compare` → `search_commentary` → draft; 3 calls, 4 turns. 15,305,000,000 vs 14,393,000,000 (prior from the 10-Q's comparative), +912,000,000, 6.3%; first candidate "reported net income of $15.3 billion, up 6%".
+
+### 3.2n Milestone 3.5 B2: grounding validator, server-rendered answers and agent evaluation (awaiting review)
+
+Decision: D-036. Code: `grounding.py` (`validate_draft`, `render_answer`, `ground`) and `agent_eval.py` (scripted-model evaluation), plus `evals/agent_v1.json`. Changes to `agent.py`:
+- The run now returns `RunEvidence`: the typed `Comparison`, `Fact` and verified `CandidatePassage` objects its successful tool calls produced. Nothing is added for a failed call.
+- The draft schema gains `subject` (the comparison the answer is about), quote `attribution` (`filing` or `management`) and `explanations`.
+- Four reserved placeholders (`{company}`, `{metric}`, `{current_period}`, `{prior_period}`) let a narrative avoid digits.
+- No financial rule, retrieval rule or tool behavior changed.
+
+```
+run_agent(...) ─▶ AgentRunResult(draft, tool_results, evidence)
+ground(run, data, cache_dir)
+  validate_draft(run, cache_dir)            checks the draft only against run.evidence
+    run not drafted / no subject / subject not produced here         ─▶ abstain
+    every value_id: produced here, and of the subject (company, metric, periods)   else abstain
+    narrative: no digits outside placeholders                         else abstain
+    citations: a verified passage from this run's search of the subject's commentary filing;
+               cached bytes still hash to it; its id still describes its text   else dropped
+    quotes: exact substring of a grounded passage; "management" only for MD&A   else dropped
+    explanations and the model's own wording: withheld (never published)
+  render_answer(run, report, data)          every published field built here from run.evidence
+```
+
+**What the validator proves:**
+- Every number in the answer was produced by a deterministic tool in this run, for the subject's company, metric and periods, and is rendered by the server from the `Comparison`.
+- The narrative stated no number of its own.
+- Every citation is a passage this run retrieved from the subject's commentary filing and verified, and the cached source still matches it. With `full_reverify=True` the passage is also re-extracted and rebuilt.
+- Every quotation is an exact substring of such a passage, and "management" appears only for MD&A text.
+
+**What it cannot prove:**
+- That a passage explains the change, that a quotation is the relevant one, or that any interpretation or cause the model proposes is true. These need semantic judgment, which matching words or hashes can't provide, and a keyword list would only pretend to.
+- Spelled-out numbers ("one trillion") are not detected. They don't reach the answer, because the model's wording is never published.
+
+**Published content** is therefore limited to:
+1. the server-rendered financial statement and figures, with provenance;
+2. verified, attributed verbatim quotations;
+3. candidate commentary (citation, filing, section, 240-character preview), labeled `support: "candidate"`.
+
+The model's narrative and explanations go to `withheld`, with reasons, for audit only.
+
+**Rendered answer (`GroundedAnswer`):**
+- **Identity and figures:**
+  - status, company, metric, statement line;
+  - current and prior values: exact `Decimal`, formatted (`$478,834,000,000`), `value_id`, `observation_id`, `fact_key`, accession, form, filed date, period basis;
+  - exact and formatted delta;
+  - percentage: status, signed display, 34-digit exact value, note.
+- **Statement and provenance:**
+  - the statement;
+  - provenance: `comparison_id`, policy, concept, unit, commentary filing and URL, Company Facts SHA-256, mapping and comparison versions.
+- **Commentary and audit:**
+  - citations, quotations, warnings, issues, withheld items;
+  - fixed limitations;
+  - run status, tool calls and model turns.
+
+An unavailable percentage is shown only as its note, never as a number. Comparative-basis periods, revisions and sign changes produce warnings.
+
+**Status policy:**
+
+| Status | When |
+|---|---|
+| `abstained` | The run produced no valid draft (model error, invalid draft, limit, timeout); the draft names no subject or one not produced in the run; or any value is unknown, from another run or context, or the narrative contains digits. No figures are published. |
+| `partial` | The figures are valid, but there is no grounded commentary, or a citation or quotation was rejected (only the bad items are dropped). |
+| `complete` | The figures are valid, at least one citation is grounded, and there are no issues. Withheld explanations do not lower the status, because nothing unverified is published. |
+
+**Validation errors** (`ValidationIssue.code`):
+- Abstain: `run_not_drafted`, `missing_subject`, `subject_not_in_run`, `value_not_in_run`, `value_context_mismatch`, `raw_number_in_text`.
+- Item dropped: `citation_not_in_run`, `citation_out_of_scope`, `citation_not_verified`, `quote_citation_invalid`, `quote_not_verbatim`, `attribution_unsupported`.
+
+A cross-run ID is indistinguishable from an invented one: both are "not produced in this run".
+
+**Prompt injection:**
+- Tool outputs reach the model as data only.
+- A passage altered after verification no longer matches its citation ID, so it is rejected.
+- A model that obeys injected text gains nothing: its numbers must be tool references, its wording is withheld, and its quotes must match verified text.
+
+**Offline evaluation (`evals/agent_v1.json`, `python -m financial_analyst.agent_eval`):**
+- **Dataset:** 26 cases.
+  - Categories: 6 direct, 3 paraphrase, 4 commentary, 3 unsupported, 2 unanswerable, 8 adversarial or injection.
+  - Expected statuses: 10 complete, 8 partial, 8 abstained.
+- **Each case:** a question, a script (what a model does, including deliberately bad behavior) and independently written labels.
+- **Labels:** values come from the filings' own statement tables (in millions there; a test checks each one appears in the filing), periods from the filings' column headings, percentages computed by hand. Plus expected status, commentary accession, required issue or tool-error codes, and text that must not be published.
+- **Runs:** each case runs twice.
+
+| Metric | Result | Applies to |
+|---|---|---|
+| Status (run and answer) | 26/26 | all cases |
+| Numeric answer (current, prior, delta, percent) | 18/18 | cases with labeled figures |
+| Company, metric and period boundaries | 18/18 | same |
+| Citation provenance (accession, in this run, quotation count) | 12/12 | cases with citations or an expected commentary filing |
+| Unsupported content rejected (required codes present, forbidden text absent) | 13/13 | adversarial, unsupported and unanswerable cases |
+| Partial or abstained when expected | 16/16 | cases expecting partial or abstained |
+| Tool-call and turn budget | 26/26 | all cases |
+| Deterministic repeat | 26/26 | all cases |
+
+The first run found one scoring defect: the answer echoes the user's question, which contained injected text. The forbidden-text check now excludes the echoed question, and no labels were changed.
+
+**What this evaluation does and does not measure:** scripts are fixed, so it tests the deterministic pipeline (tool validation, limits, grounding, rendering, abstention) under known good, bad and adversarial model behavior. It says nothing about how often a real LLM chooses the right tools, picks relevant passages or attempts unsupported claims. That requires a live model and a separate evaluation (M3.6).
+
+**Remaining work for M3.6:**
+- a live provider adapter behind `complete(...)` (keys from configuration, never from code);
+- live-model evaluation on the same labels, with repeated sampling;
+- deciding whether any model wording can be published (for example, constrained templates);
+- a research endpoint;
+- reliable MD&A labels for JPMorgan's 10-Q.
 
 ### 3.3 Later milestone: ingestion
 
