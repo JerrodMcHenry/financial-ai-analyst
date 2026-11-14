@@ -3,10 +3,20 @@
 Lightweight architecture decision records. Each entry states the decision, why it was made, and the main alternative considered.
 Status values: **Proposed** (awaiting owner approval), **Accepted**, **Superseded**.
 
+**State at the close of the core engineering phase (2026-11-14):** every decision below is
+Accepted. Several early decisions were later refined, and each says where; the original text
+is kept as the historical record. The final system is summarized in
+`docs/architecture.md` §2. The decisions that define it are:
+- D-030–D-033: data and financial engine;
+- D-034: analysis;
+- D-035–D-037: the agent and provider adapter;
+- D-036, D-039, D-040, D-043: grounding and request scope;
+- D-038, D-041, D-042: live reliability.
+
 ---
 
 ## D-001 Modular monolith
-**Status:** Accepted (2026-11-11)
+**Status:** Accepted (2026-11-11). The modular monolith holds; the capability *packages* were replaced by flat modules (D-017), and the planned ingestion, storage and HTTP research layers were not built in the core phase.
 **Decision:** A single FastAPI service, organized into capability packages (`sec`, later `ingestion`, `retrieval`, `calc`, `agent`, …).
 **Why:** One deployable unit, one test suite, no network boundaries to secure or monitor. Package boundaries still keep responsibilities separate and leave room to extract services later.
 **Alternative:** Microservices. Rejected because operational cost exceeds any benefit at this scale.
@@ -46,27 +56,27 @@ Status values: **Proposed** (awaiting owner approval), **Accepted**, **Supersede
 **Alternative:** `respx`.
 
 ## D-008 XBRL facts are the authoritative numeric source
-**Status:** Proposed
+**Status:** Accepted (implemented in M1.4 and M3.3: every published figure comes from Company Facts through `compare_periods`; text never feeds a calculation)
 **Decision:** Numbers used in calculations come from XBRL structured facts. Narrative retrieval supplies explanation. Numbers that appear only in text are labeled as text-sourced and never feed calculations silently.
 **Why:** XBRL is exact and typed. Reading numbers from HTML or prose is error-prone (scale, tables, OCR-like noise).
 
 ## D-009 `Decimal` for financial values
-**Status:** Proposed (applies from Milestone 1)
+**Status:** Accepted (implemented from M1.4; percentages computed to 34 significant digits, rounded only for display, D-033)
 **Decision:** Fact values and calculation inputs and outputs use `decimal.Decimal`. Rounding happens only at presentation.
 **Why:** Avoids binary floating-point error in financial arithmetic.
 
 ## D-010 Provenance contract and id-based citations
-**Status:** Accepted (2026-11-11)
+**Status:** Accepted (2026-11-11). Implemented with different names: `FactObservation`/`Fact` with `observation_id` and `value_id`s for facts, and passage citation IDs (D-024) for text. Grounding resolves only the IDs produced in the same run (D-036).
 **Decision:** There are three provenance levels: `SourceMetadata` for each HTTP fetch, `FactRecord`, and `ChunkRecord`. Each filing carries its accession number and canonical archive URL. Citations reference `fact_id` or `chunk_id` values returned by tools in the same request, and the server validates and resolves them.
 **Why:** It is structurally impossible for the model to cite a source that was not retrieved.
 
 ## D-011 Never silently merge periods, units or restatements
-**Status:** Proposed
+**Status:** Accepted (implemented in M1.4 and M3.3: explicit selection policies, same-filing comparisons, revisions reported separately. Q4 is refused rather than derived.)
 **Decision:** Facts are keyed by `(cik, taxonomy, concept, unit, period_start, period_end, accession)`. Selecting among conflicting values is an explicit, logged policy. Derived values (such as Q4) are labeled with their inputs.
 **Why:** Required by the engineering principles. In Company Facts, `fy`/`fp` describe the filing, not the fact's period.
 
 ## D-012 Native LLM tool calling, no agent framework
-**Status:** Proposed (applies to a later milestone)
+**Status:** Accepted (implemented in M3.5–M3.8: `agent.py` and the OpenAI-compatible adapter `llm_provider.py`, D-035, D-037; verified live in M3.8.2)
 **Decision:** A small loop around the provider's native tool-calling API, behind a thin provider adapter.
 **Why:** Full control over validation, citations and telemetry. Fewer dependencies. Easier to explain.
 
@@ -455,7 +465,7 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - Calling onnxruntime directly without FastEmbed: possible, about 40 lines. The owner chose FastEmbed, and its output matched this direct pipeline exactly in a check.
 
 ## D-030 Immutable structured-data snapshots and exact company identity
-**Status:** Proposed (M3.2 B1, 2026-11-13; implements the approved M3.1 design)
+**Status:** Accepted (M3.2 B1, 2026-11-13; implements the approved M3.1 design; the five snapshots were acquired and pinned in M3.2 B2)
 **Decision:**
 - **What is stored:** SEC submissions, Company Facts and `company_tickers.json` responses, as immutable snapshots in the existing git-ignored cache (`filing_cache.py`, architecture §3.2i).
   - Content-addressed by the full SHA-256 of the exact response bytes.
@@ -498,7 +508,7 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - Fuzzy name matching: rejected for the first release.
 
 ## D-031 Grounding rules for fiscal periods and same-filing comparisons (for M3.3)
-**Status:** Accepted (owner corrections to the M3.1 design, 2026-11-13). To be implemented in M3.3; nothing implements them yet.
+**Status:** Accepted (owner corrections to the M3.1 design, 2026-11-13). Implemented in M3.3 (D-032, D-033).
 **Decision:**
 1. **Historical fiscal periods are grounded in actual filing report dates and observation period boundaries.**
    - A company's `fiscal_year_end` (submissions) is a consistency check, not the sole authority.
@@ -510,7 +520,7 @@ Nothing here rejects semantic or hybrid retrieval in general.
 **Why:** these keep requested periods, original reporting filings, observation source filings and commentary filings distinct (the M3.1 design). They also make sure numbers match the filing whose commentary explains them.
 
 ## D-032 Exact concept mapping, grounded fiscal periods and explicit fact selection
-**Status:** Proposed (M3.3 B1, 2026-11-14)
+**Status:** Accepted (M3.3 B1, 2026-11-14)
 **Decision:** `financial_tools.py` adds `CONCEPT_MAPPINGS` (version 1), `resolve_period` and `get_fact` (architecture §3.2j).
 - **Mapping:** one exact `us-gaap` concept and unit per company and metric, for revenue, net income and total assets at Apple and JPMorgan Chase. Each mapping records the company's statement line and the reason for the choice.
   - Each was validated against the face financial statements of the cached filings: Apple's FY2026 10-K and Q3 FY2026 10-Q, and JPMorgan's Q3 2026 10-Q.
@@ -611,7 +621,7 @@ Nothing here rejects semantic or hybrid retrieval in general.
 **Status:** Accepted (M3.5 B2, 2026-11-14)
 **Decision:** a draft becomes an answer only through `grounding.validate_draft` and `render_answer` (architecture §3.2n).
 - **Evidence:** the validator checks the draft against `RunEvidence`, the typed objects this run's successful tool calls produced. It never uses the model's account of tool results.
-- **Numbers:** every placeholder must map to a `value_id` produced in this run for the answer's subject comparison (same company, metric and periods). The narrative may contain no digits. Any failure means the answer abstains.
+- **Numbers:** every placeholder must map to a `value_id` produced in this run for the answer's subject comparison (same company, metric and periods). The narrative may contain no digits (removed by D-043). Any failure means the answer abstains.
 - **Citations:** each must be a verified passage from this run's search of the subject's commentary filing, whose cached bytes still hash to the cited source and whose ID still describes its text (full rebuild optional). Failures drop the item, and the answer is at most partial.
 - **Quotations:** at most 3, of 300 characters each. Each must be an exact substring of a grounded passage. Management attribution is allowed only for MD&A passages.
 - **Published content:** only the server-rendered statement and figures with provenance, verified attributed quotations, and candidate commentary. The model's wording and explanations are withheld, with reasons.
@@ -707,7 +717,7 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - Leniency for invalid drafts beyond null lists: rejected; the placeholder rule and value-ID patterns stay strict.
 
 ## D-040 Commentary only when asked, citation feedback, consolidated metrics only, and outcome-based evaluation
-**Status:** Proposed (M3.7, 2026-11-14)
+**Status:** Accepted (M3.7, 2026-11-14)
 **Decision:**
 - **What a complete answer must contain** comes from the question:
   - figures only, unless the question asks for commentary (fixed cues) or a quotation;
@@ -729,3 +739,52 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - Forcing a commentary search in the agent loop: rejected, because the requirement belongs to the published answer, and a forced extra turn would spend budget on questions that do not need it.
 - Short citation aliases for the model: rejected for now, because mapping aliases to IDs is a substitution layer the validator would have to trust.
 - Narrower segment detection (only directly before a metric word): rejected for now, as more fragile. The broad rule abstains rather than risk a consolidated answer.
+
+## D-041 Response-shape diagnostics, honest usage accounting, and no placeholder syntax rules
+**Status:** Accepted (M3.8, 2026-11-14)
+**Decision:**
+- **Response shapes:** the adapter records each response's structure (key names, content and part types, tool-call count and names, finish reason, refusal and usage presence), never its content.
+- **Parsing:** structured text parts are read. `empty_response`, `refusal` and `content_filter` are distinct error kinds.
+- **Usage:** recorded whenever the body carries it, even if parsing then fails. Requests without usage are counted and reported, never treated as zero, and costs are then lower bounds.
+- **Draft contract:** the three placeholder-syntax rules are removed, and `placeholder` is optional. Every grounding check stays: value IDs from the run and the subject, no digits in the narrative, request scope, citations, quotations, status policy.
+- **Repair feedback:** names each rejected field with its permitted correction, never the rejected value. The single repair and the budgets are unchanged.
+
+**Why:**
+- The placeholder rules guarded the rendering of a narrative that has not been rendered since D-036, so they only produced failures (four of the M3.7 live drafts). Removing them weakens no published guarantee.
+- Without the response shape, an empty response cannot be diagnosed. Without the failed requests' usage, costs were silently understated.
+
+**Alternatives:**
+- Making the narrative optional, or dropping the digit check: deferred. The digit check is a cheap signal of an unreliable draft and caused no observed failure.
+- Treating an empty response as a decline: rejected, because it would turn a provider failure into an abstention that looks deliberate.
+
+## D-042 Require a function call on every turn; the last turn may only answer
+**Status:** Accepted (M3.8.1, 2026-11-14)
+**Decision:**
+- **Normal turns:** sent with `tool_choice: "required"` (the five agent tools plus `submit_answer`).
+- **Repair turns and the last allowed turn:** offer and force only `submit_answer`.
+- **Refusals unchanged:** a call to an agent tool on those turns is refused as before (`invalid_draft` after a repair, `turn_limit` on the last turn) and never runs.
+- **Unchanged:** the budgets, the single repair, and every validation and grounding rule.
+
+**Why:**
+- The live empty responses were the model ending its turn without a call, which `"auto"` permits.
+- No acceptable turn in this agent is plain text, so requiring a function call removes an option the agent cannot use.
+- Forcing the answer on the last turn turns a guaranteed `turn_limit` into a draft that grounding can still accept or reject.
+
+**Alternatives:**
+- Treating an empty message as a repair trigger: rejected, because it spends a turn and the repair on a provider behavior the API can prevent.
+- `parallel_tool_calls: false`: not needed, since several calls in one turn are already handled and budgeted.
+
+## D-043 Remove the digit rule; keep model-written text out of the answer
+**Status:** Accepted (M3.8.2, 2026-11-14; verified live: the final two-case run passed 2/2)
+**Decision:**
+- **Digit rule:** `raw_number_in_text` is removed. Digits in the model's note no longer abstain, and no placeholder rule replaces it.
+- **Model text in the answer:** the answer object no longer contains any model-written text except verified quotations. Withheld notes and explanations are recorded by kind and length, with their text kept only in the run record. A rejected quotation's words are not echoed in issue details, which the CLI prints.
+
+**Why:**
+- A code trace shows the note influences nothing that is published: figures, scope, citations, quotations, attribution or status (apart from the rule itself).
+- The rule's purpose was that no model-typed number reaches the user. That is now enforced more strongly: no model-typed text of any kind reaches the answer object.
+- The rule was the sole cause of the remaining live failure (M3.8.1, Apple).
+
+**Alternatives:**
+- Requiring placeholders for periods: rejected, because it reintroduces syntax the model failed to follow and protects nothing that is published.
+- Keeping the rule as a "hallucination signal": rejected, because it abstained correct, in-scope answers. The signals that matter (value IDs, scope, citations, quotations) remain.

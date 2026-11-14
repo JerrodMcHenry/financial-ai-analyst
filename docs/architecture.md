@@ -1,6 +1,14 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal periods, concept mapping, fact selection) committed; M3.3 B2 (deterministic same-filing comparisons and percentage change) approved; M3.4 (evidence-backed analysis: comparison plus verified candidate commentary, no LLM) committed; M3.5 B1 (provider-independent tool-calling orchestration with a scripted fake model) committed; M3.5 B2 (deterministic grounding, server-rendered answers, offline agent evaluation) committed; M3.6 B1 (OpenAI-compatible live provider adapter and live CLI) committed; M3.6 B2 first live smoke tests run (two cases; neither complete); M3.6 B2.1–B2.3 (six turns, workflow prompt, live diagnostics, attribution rule) committed; M3.6 B3 eight-case live evaluation run (3/8 passed); M3.6 B3.1 (repair protocol, request-scope validation) committed; M3.6 B3.2 four-case live verification run; M3.7 (commentary only when asked, citation feedback, unsupported segment metrics, outcome-based evaluation v2) awaiting review. A live LLM provider adapter exists; only the two authorized smoke tests have been run against a real provider. Sections marked "later" are design intent, not commitments.
+Status: **core engineering phase complete (2026-11-14).** The final system is described in §2. Sections §3.1–§3.2u record each milestone as it was built, including later-superseded behavior; §3.3–§3.4 are the original design for parts not built in the core phase. Decisions: `docs/decisions.md`. Demo: `docs/demo.md`. Case study: `docs/case-study.md`.
+
+<details><summary>Milestone log</summary>
+
+**Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal periods, concept mapping, fact selection) committed; M3.3 B2 (deterministic same-filing comparisons and percentage change) approved; M3.4 (evidence-backed analysis: comparison plus verified candidate commentary, no LLM) committed; M3.5 B1 (provider-independent tool-calling orchestration with a scripted fake model) committed; M3.5 B2 (deterministic grounding, server-rendered answers, offline agent evaluation) committed; M3.6 B1 (OpenAI-compatible live provider adapter and live CLI) committed; M3.6 B2 first live smoke tests run (two cases; neither complete); M3.6 B2.1–B2.3 (six turns, workflow prompt, live diagnostics, attribution rule) committed; M3.6 B3 eight-case live evaluation run (3/8 passed); M3.6 B3.1 (repair protocol, request-scope validation) committed; M3.6 B3.2 four-case live verification run; M3.7 (commentary only when asked, citation feedback, unsupported segment metrics, outcome-based evaluation v2) committed; M3.7 final eight-case live evaluation run (2/8); M3.8 (response-shape diagnostics, usage accounting, simpler draft contract, field-specific repair feedback) approved; M3.8 live verification run (0/2: empty responses); M3.8.1 (required function calls, answer-only last turn) committed; M3.8.1 live verification run (1/2: Apple abstained on digits in the unpublished note); M3.8.2 (digit rule removed, model text kept out of the answer) awaiting review. A live LLM provider adapter exists; only the two authorized smoke tests have been run against a real provider. Sections marked "later" are design intent, not commitments.
+
+M3.8.2 was approved, and its final two-case live verification passed 2/2.
+</details>
+
 Last updated: 2026-11-14
 
 ---
@@ -9,38 +17,90 @@ Last updated: 2026-11-14
 
 | Item | Finding |
 |---|---|
-| Code | Milestone 0 (FastAPI `/health`, config, SEC client) and Milestone 1 (filing retrieval, extraction, document cache, XBRL Company Facts, M1.5 hardening) are implemented. The project directory was empty when this document was first written. |
-| Git | Originally had no repository of its own (the enclosing repo was the home directory). **Resolved:** the owner initialized a project repository on `main`, remote `https://github.com/JerrodMcHenry/financial-ai-analyst.git`, with an initial commit containing `README.md`. |
-| Python | 3.13.5 is installed (python.org and Anaconda builds). No 3.12 interpreter is installed. |
-| Tooling | `uv` 0.11.14 is installed. Docker is **not** installed (needed in a later milestone). |
+| Code | 20 flat modules in `src/financial_analyst/` (about 8,400 lines): SEC access, snapshots and cache, extraction, passages, retrieval, financial tools, analysis, request scope, agent, grounding, provider adapter, CLIs and evaluations (§4.1). FastAPI serves only `/health`. |
+| Data | Five SEC snapshots pinned by SHA-256 in `evals/sec_snapshots_v1.json`, and three cached filings, in the git-ignored `data/sec-cache`. Tests and evaluations never contact SEC. |
+| Tests | 829 offline tests (pinned-data tests need the local cache). Scripted agent evaluation v2: 28/28. Final live verification (GPT-5.4 mini): 2/2 supported figures-only cases. |
+| Git | A dedicated repository on `main`, remote `https://github.com/JerrodMcHenry/financial-ai-analyst.git`. The owner makes every commit. |
+| Tooling | Python ≥ 3.12 (developed on 3.13.5), `uv`, `ruff`, `pytest`. No Docker, database or frontend. |
 
-Deferred work is listed in §10. Decisions are recorded in `docs/decisions.md`.
+Decisions are recorded in `docs/decisions.md`.
 
 ---
 
-## 2. System overview
+## 2. System overview (final, M3.8.2)
 
-This is a **modular monolith**: one deployable FastAPI service, organized into packages with clear boundaries. Each package corresponds to a capability that will be added in a specific milestone.
+A **modular monolith** of flat Python modules (D-001, D-017). Questions are answered from pinned data on disk; SEC is contacted only by the one-time acquisition and document-fetch tools, never on the question path (D-003).
 
 ```
-                         ┌──────────────────────────────────────────────┐
-  Analyst UI  ──HTTP──▶  │ FastAPI app (api)                            │
-  (Next.js, later)       │   /health   /research (later)                │
-                         ├──────────────────────────────────────────────┤
-                         │ agent      : LLM tool-calling loop (later)   │
-                         │ tools      : validated tool schemas (later)  │
-                         │ calc       : deterministic finance (later)   │
-                         │ retrieval  : facts + passages (later)        │
-                         │ ingestion  : EDGAR → normalized store (later)│
-                         │ sec        : EDGAR HTTP client  ◀── M0       │
-                         │ config     : env-based settings ◀── M0       │
-                         └───────┬───────────────────────┬──────────────┘
-                                 │                       │
-                       SEC EDGAR (data.sec.gov,   PostgreSQL + pgvector
-                       www.sec.gov/Archives)      (later)
+question ─▶ request_scope.capture_scope ── company, metric, periods, commentary/quotation asked? (fixed patterns)
+    │
+    ▼
+agent.run_agent ◀──▶ Model.complete(messages, tools)
+    │                 ScriptedModel (tests, evaluation)  |  llm_provider.OpenAICompatibleModel (live)
+    │   tools (validated, strict arguments, no paths or URLs):
+    │     resolve_company ── financial_tools.resolve_company (pinned ticker map)
+    │     get_fact / compare ── financial_tools.resolve_period, get_fact, compare_periods
+    │     commentary_filing / search_commentary ── analysis.retrieve_commentary
+    │           (filing cache → filing_extractor → passages → retrieval.KeywordIndex (BM25)
+    │            → passages.verify_citations)
+    │   limits: 6 model turns, 6 tool calls, 90 s, 1 repair
+    ▼
+AgentRunResult (draft + RunEvidence: comparisons, facts, verified passages, searches)
+    │
+    ▼
+grounding.validate_draft ── against RunEvidence and the request scope only
+    │
+    ▼
+grounding.render_answer ─▶ GroundedAnswer: complete | partial | abstained
+                            server-rendered statement, figures, provenance,
+                            verified quotations, candidate commentary, warnings
 ```
 
-Key separation: **the SEC client is only used by ingestion**, never directly on the user's question path. Analyst questions are answered from our own normalized store. This keeps the request path fast and predictable, keeps SEC traffic low and cacheable, and makes evaluations reproducible.
+**Agent turns and required function calls (D-042):**
+
+| Turn | Functions offered | `tool_choice` | An agent-tool call on this turn |
+|---|---|---|---|
+| Normal (turns 1–5, no repair pending) | five agent tools + `submit_answer` | `"required"` | validated and run, within the 6-call budget |
+| Repair (after a rejected draft) | `submit_answer` only | forced `submit_answer` | refused (`invalid_draft`), never run |
+| Last allowed turn (6) | `submit_answer` only | forced `submit_answer` | refused (`turn_limit`), never run |
+
+A draft is rejected for repair when it fails the schema, or cites a passage ID that this run's search never returned (`citation_not_returned`). The feedback names each rejected field and its permitted correction, never the rejected value (D-039–D-041).
+
+**Deterministic calculations (D-031–D-033):**
+- exact per-company XBRL concepts;
+- fiscal periods from filing report dates and observation boundaries (never SEC's `fy`/`fp` tags);
+- both values from one filing;
+- Decimal delta, and a percentage to 34 significant digits, shown half-even to one decimal only for a positive base;
+- revisions from other filings reported separately.
+
+**Grounding (D-036, D-039, D-040, D-043).** The draft supplies a subject (`comparison_id`), value IDs, citation IDs, quotations and explanations.
+- **Abstained (no figures published):**
+  - the run produced no valid draft, or the draft names no subject or one not produced in this run;
+  - a value ID is not from this run or not about the subject;
+  - the subject does not match the request scope (`scope_mismatch`), or the scope is unparsed, ambiguous or unsupported (`scope_unresolved`).
+- **Partial:**
+  - a citation is not one of this run's verified passages for the subject's filing, or its cached source changed;
+  - a quotation is not an exact substring of its passage, or is attributed to management outside MD&A;
+  - or the question asked for commentary or a quotation and none was verified.
+- **Complete:** otherwise. Figures-only questions need no commentary.
+
+**Response rendering:** `render_answer` builds every published field from `RunEvidence`:
+- the statement ("Apple Inc. total net sales was $478,834,000,000 for FY2026 …");
+- exact and formatted values, delta and percentage;
+- provenance (`comparison_id`, concept, unit, filing, Company Facts SHA-256);
+- verified quotations with server-written attribution;
+- candidate commentary previews;
+- warnings and limitations.
+
+The model's note and explanations are withheld, recorded only by kind and length. The answer object contains no model-written text except verified quotations.
+
+**Evaluation:**
+- `pytest`: 829 offline tests;
+- `agent_eval`: v1 (frozen, path-specific labels) and v2 (outcome-based labels, ten dimensions);
+- `live_agent eval`: live runs scored with the same checks, with per-case diagnostics (tool sequence, error codes, response shapes, usage, cost);
+- the retrieval evaluation harness (§3.2g–§3.2h).
+
+**Original design not built in the core phase:** ingestion into a database with a vector store, an HTTP research endpoint, a UI (§3.3, §3.4, §10).
 
 ---
 
@@ -986,7 +1046,7 @@ ground(run, data, cache_dir)
   validate_draft(run, cache_dir)            checks the draft only against run.evidence
     run not drafted / no subject / subject not produced here         ─▶ abstain
     every value_id: produced here, and of the subject (company, metric, periods)   else abstain
-    narrative: no digits outside placeholders                         else abstain
+    narrative: no digits outside placeholders                         else abstain  (removed in M3.8.2)
     citations: a verified passage from this run's search of the subject's commentary filing;
                cached bytes still hash to it; its id still describes its text   else dropped
     quotes: exact substring of a grounded passage; "management" only for MD&A   else dropped
@@ -1036,7 +1096,7 @@ An unavailable percentage is shown only as its note, never as a number. Comparat
 | `complete` | The figures are valid, at least one citation is grounded, and there are no issues. Withheld explanations do not lower the status, because nothing unverified is published. |
 
 **Validation errors** (`ValidationIssue.code`):
-- Abstain: `run_not_drafted`, `missing_subject`, `subject_not_in_run`, `value_not_in_run`, `value_context_mismatch`, `raw_number_in_text`.
+- Abstain: `run_not_drafted`, `missing_subject`, `subject_not_in_run`, `value_not_in_run`, `value_context_mismatch`, `raw_number_in_text` (removed in M3.8.2, §3.2u).
 - Item dropped: `citation_not_in_run`, `citation_out_of_scope`, `citation_not_verified`, `quote_citation_invalid`, `quote_not_verbatim`, `attribution_unsupported`.
 
 A cross-run ID is indistinguishable from an invented one: both are "not produced in this run".
@@ -1290,7 +1350,7 @@ Scoring would then report the five properties separately, with run status (relia
 - The fixes are verified only offline (mocked provider). Whether GPT-5.4 mini now repairs successfully, and why its first drafts were rejected, is unknown until a live run records `draft_rejections`.
 - Questions outside the supported patterns now abstain even when the model's comparison would have been right.
 
-### 3.2r Milestone 3.7: what an answer must contain, citation feedback, segment metrics, evaluation v2 (awaiting review)
+### 3.2r Milestone 3.7: what an answer must contain, citation feedback, segment metrics, evaluation v2 (approved)
 
 Decision: D-040.
 
@@ -1382,6 +1442,122 @@ Decision: D-040.
 | Segment and product metrics abstain | yes | **not yet** |
 | Evaluation v2 scoring of live runs | yes (mocked) | **not yet** |
 
+### 3.2s Milestone 3.8: provider and draft stabilization (approved)
+
+Decision: D-041.
+
+**M3.7 final live evaluation (GPT-5.4 mini, agent_v2, eight cases, 26 requests, ≥ $0.056).**
+- **Result:** 2/8 outcome passes; 2/8 runs drafted.
+- **Failures:**
+  - three normal answer turns returned no recognized tool call or text (`finish_reason=stop`), ending in `model_error`;
+  - three drafts failed the placeholder rules (`reserved_placeholder`, `placeholder_mismatch`) twice, ending in `invalid_draft`.
+- **Safety:** nothing incorrect or off-question was published, and the unsupported cases abstained.
+
+**What the implementation proved.**
+1. **Usage accounting (confirmed defect):** a request whose 200 response failed parsing was recorded without its usage, and `usage()` counted missing usage as zero. The three empty-response requests were therefore left out of the reported tokens and cost.
+2. **Structured content (confirmed defect):** any non-string `content`, including a list of text parts, was treated as empty and reported as "neither tool calls nor content".
+3. **What the live error proves:** the three failures had no usable `tool_calls`, no non-empty string `content`, and an empty or absent `refusal`.
+   - **Unverified:** whether `content` was null, an empty string or a list of parts, and whether anything appeared under another key. The earlier diagnostics did not record the shape. No cause is claimed.
+4. **Placeholder rules (confirmed by analysis):** they enforced nothing that is still observable. The rules checked that `{placeholder}`s in the narrative matched the declared values and avoided the four reserved names. They existed so the narrative could be rendered with server-formatted numbers (M3.5 B1). Since M3.5 B2 the narrative is never rendered or published; it is withheld. The figures come only from the subject comparison, rendered by the server.
+
+**Changes.**
+- **Response shapes:** `llm_provider.describe_response` records each response's structure, never its content:
+  - message keys, content type (absent, null, empty string, string, parts, other) and part types;
+  - tool-call count and names, finish reason;
+  - refusal and usage presence.
+
+  Every `ProviderCall` carries its shape, its error kind and its usage. The live report prints the shape of each failed request.
+- **Parsing:**
+  - structured content is read: `text` and `output_text` parts are joined;
+  - a tool call without `"type"` is read as a function call;
+  - errors are now distinct kinds: `empty_response`, `refusal`, `content_filter` (and `malformed_response` only for responses that really are malformed). Their messages give the shape summary.
+- **Usage accounting:**
+  - usage is recorded whenever the response body carries it, even when parsing then fails;
+  - `Usage.requests_without_usage` counts requests with no usage (for example timeouts), whose tokens are unknown, not zero;
+  - costs are labeled "at least" when any are missing;
+  - the live report adds `requests` and `requests_without_usage`.
+- **Draft contract:**
+  - `duplicate_placeholder`, `reserved_placeholder` and `placeholder_mismatch` are removed;
+  - `ValueRef.placeholder` is optional;
+  - the prompt now says that the server renders figures, periods and the company name from the subject, that the answer is a short note with no digits, and that `values` lists the value IDs relied on.
+- **Repair feedback:** each rejected field is named with its permitted correction from a fixed table (subject, value_id, placeholder, answer, quote text, attribution, citation_id, an unknown field, or not an object), never with the rejected value. Still one repair at most, with no new turns or tool calls.
+
+**Safety invariants and how each is still enforced:**
+
+| Invariant | Enforced by (unchanged) |
+|---|---|
+| Published figures are tool-derived | The renderer formats only the subject `Comparison`. The model's text is never published. |
+| The model's referenced values are real and on-topic | `value_not_in_run`, `value_context_mismatch` (abstain) |
+| No model-typed number is relied on | `raw_number_in_text` (abstain; removed in M3.8.2) and the narrative is withheld |
+| Answers the question asked | Request scope: `scope_unresolved`, `scope_mismatch` |
+| Citation provenance | Run-returned, subject-scoped and source-rechecked citations; `citation_not_returned` feedback |
+| Verbatim, correctly attributed quotations | `quote_not_verbatim`, `attribution_unsupported` |
+| Appropriate abstention | The status policy (M3.7) |
+
+**Not verified live:** whether GPT-5.4 mini's empty responses were null, empty-string or structured content (the next live run will record it), and whether the simpler contract and the new feedback raise the draft success rate.
+
+### 3.2t Milestone 3.8.1: required function calls (approved)
+
+Decision: D-042.
+
+**M3.8 live verification (two cases, 5 requests, $0.0092, all usage reported): 0/2 drafted.** In both runs the turn right after a successful `compare` returned a well-formed empty message:
+- content `""` and no `tool_calls` key;
+- `finish_reason=stop`, no refusal;
+- usage present: about 2,700 tokens in, **3 out**;
+- message keys `annotations, content, refusal, role`.
+
+This is the model ending its turn without a call, which `tool_choice: "auto"` allows. It is not a response the adapter misread.
+
+**Change.** Every acceptable turn in this agent is a function call (an agent tool or `submit_answer`), so requests now require one:
+
+| Turn | Functions offered | `tool_choice` | A call to an agent tool |
+|---|---|---|---|
+| Normal (turns 1–5, no repair pending) | the five agent tools + `submit_answer` | `"required"` | runs as before (validated, budgeted) |
+| Repair (after a rejected draft) | `submit_answer` only | `{"type": "function", "function": {"name": "submit_answer"}}` | refused: `invalid_draft`, not run |
+| Last allowed turn (turn 6) | `submit_answer` only | same forced choice | refused: `turn_limit`, not run |
+
+- **Agent:** passes no agent tools when a repair is pending or when the turn is the last allowed one. The prompt says that when only `submit_answer` is offered, the model should submit its best draft, with subject null if it cannot answer.
+- **Adapter:** sends `"required"` when agent tools are offered, and the forced `submit_answer` choice otherwise.
+- **Unchanged:** budgets (6 turns, 6 tool calls, 90 s), the single repair, tool argument validation, request scope, grounding, citation and quotation checks, abstention. A provider that still returns an empty message ends the run as `model_error`, with the response shape recorded and its usage counted.
+
+**Request format:** `tool_choice` values `"none"`, `"auto"`, `"required"` and a named function are the documented Chat Completions options. Strict mode is not used (tools stay non-strict, the Chat Completions default).
+
+**Not verified live:** whether GPT-5.4 mini honors `"required"` (it should, under OpenAI's contract), and how its drafts score once it must answer.
+
+### 3.2u Milestone 3.8.2: the digit rule removed (approved; verified live 2/2)
+
+Decision: D-043.
+
+**M3.8.1 live verification (two cases, 4 requests, $0.0102, all usage reported).**
+- **Required function calls worked:** both runs called `compare`, then `submit_answer`, with a valid draft and no provider error.
+- **JPMorgan** was `complete` with correct figures.
+- **Apple** abstained only on `raw_number_in_text`: digits in the model's note, although its comparison was correct and in scope.
+
+**Where the note goes (traced in the code).** `AnswerDraft.answer` is used in exactly three places:
+1. **Agent:** replayed to the model in its own conversation, and kept in the run record (`AgentRunResult.draft`, `messages`). The model sees it; users do not.
+2. **The digit rule:** `raw_number_in_text`, the only use that could change the outcome.
+3. **The answer object:** `GroundedAnswer.withheld` carried its text verbatim, as an audit entry. The CLI never printed it, but the object did contain it.
+
+**What the note cannot affect:**
+- The statement and figures are rendered from the subject `Comparison`.
+- Company, metric and periods come from `subject` and the request scope.
+- Citations, quotations and attribution come from their own fields and are verified against this run's passages.
+- The status depends on issues and on the citations and quotations requested.
+
+The note feeds none of these. Separately, a rejected quotation's text was echoed (up to 80 characters) in the `quote_not_verbatim` issue detail, and the CLI prints issue details. That was model-written text reaching the user.
+
+**Changes:**
+- **Digit rule:** `raw_number_in_text` is removed, as an issue code and as a reason to abstain. No placeholder requirement replaces it. The prompt now calls the answer field "only a short note: it is never published".
+- **Withheld text:** `WithheldClaim` carries the note's and each explanation's length (`characters`) instead of their text. The text remains only in the run record.
+- **Rejected quotations:** the `quote_not_verbatim` detail gives the quotation's length, not its words.
+- **Result:** the published answer object contains no model-written text except verified quotations, which are exact substrings of filing passages.
+
+**Unchanged safeguards:** request scope; value IDs from the run and the subject; citations from this run's search of the subject's filing, rechecked against the source; verbatim, correctly attributed quotations; deterministic rendering; the status and abstention policy; tool argument validation, budgets and the single repair.
+
+**Scripted results:**
+- v2: 28/28.
+- v1 (frozen): 19/26. `raw-number-in-narrative` joins the documented intended differences: it is now `complete`. The model's invented "500 billion" is still unpublished. Its label also forbids the correct figure "478,834", only because v1 expected an abstention; the test allows exactly that figure.
+
 ### 3.3 Later milestone: ingestion
 
 ```
@@ -1394,6 +1570,8 @@ ticker → CIK (company_tickers.json)
 ```
 
 ### 3.4 Later milestone: research question
+
+*Original design. The agent loop, tools, validated citations and number checks were built in M3.5–M3.8 (§2, §3.2m–§3.2u) as a command-line flow, without the HTTP endpoint.*
 
 ```
 POST /research {question}
@@ -1413,57 +1591,46 @@ POST /research {question}
 
 ## 4. Directory structure
 
-### 4.1 Current structure (Milestone 2.4 B1)
+### 4.1 Current structure (final, M3.8.2)
 
 ```
 enterprise-financial-ai-analyst/
-├── pyproject.toml              # deps, tool config, Python ≥3.12
-├── uv.lock                     # reproducible lockfile
-├── README.md
-├── .env.example                # placeholder values only
-├── .gitignore
-├── CLAUDE.md                   # permanent engineering rules for this repo
+├── pyproject.toml, uv.lock     # dependencies (fastapi, uvicorn, pydantic, pydantic-settings, httpx, beautifulsoup4)
+├── README.md, CLAUDE.md, .env.example
 ├── docs/
-│   ├── architecture.md
-│   └── decisions.md
-├── src/
-│   └── financial_analyst/
-│       ├── __init__.py
-│       ├── main.py             # FastAPI app + GET /health
-│       ├── config.py           # Settings (pydantic-settings)
-│       ├── sec_client.py       # SecClient: submissions + filing documents (pacing, retries)
-│       ├── sec_models.py       # SourceMetadata, FilingRef, CompanySubmissions, FilingDocument
-│       ├── filing_extractor.py # extract_filing: HTML → ordered blocks, sections, diagnostics
-│       ├── filing_cache.py     # filesystem cache for FilingDocuments (fetch / load / save)
-│       ├── passages.py         # build_passages, citation ids, offline verify_citation
-│       ├── retrieval.py        # tokenize, KeywordIndex (BM25), select_latest_filing
-│       ├── evaluation.py       # offline retrieval evaluation: dataset, metrics, runner, CLI
-│       └── company_facts.py    # XBRL fact period classification and observation selection
-└── tests/
-    ├── conftest.py             # shared settings fixture
-    ├── fixtures/
-    │   ├── submissions_sample.json   # trimmed EDGAR submissions payload
-    │   ├── companyfacts_sample.json  # hand-written Company Facts payload (illustrative values)
-    │   ├── filing_sample.htm         # trimmed inline-XBRL 10-K-style HTML
-    │   ├── filing_10q_sample.htm     # trimmed inline-XBRL 10-Q-style HTML (Parts I/II)
-    │   ├── filing_sectionless_sample.htm  # 10-Q-style HTML with no detectable sections
-    │   └── eval_sample.json          # evaluation dataset pinning the three sample filings
-    ├── test_company_facts.py
-    ├── test_evaluation.py
-    ├── test_config.py
-    ├── test_filing_cache.py
-    ├── test_filing_extractor.py
-    ├── test_health.py
-    ├── test_passages.py
-    ├── test_retrieval.py
-    └── test_sec_client.py
+│   ├── architecture.md         # this document
+│   ├── decisions.md            # decision log (D-001 – D-043)
+│   ├── demo.md                 # reproducible demonstration
+│   └── case-study.md           # portfolio summary
+├── evals/
+│   ├── sec_snapshots_v1.json   # manifest pinning the five SEC snapshots by SHA-256
+│   ├── agent_v1.json           # scripted agent evaluation, frozen (path-specific labels)
+│   ├── agent_v2.json           # scripted agent evaluation, outcome-based labels
+│   ├── retrieval_v1.json, retrieval_v1.baseline.json, retrieval_v2_heldout.json
+│   └── results/                # held-out retrieval results (BM25, semantic, hybrid)
+├── src/financial_analyst/
+│   ├── main.py, config.py      # FastAPI /health; environment settings
+│   ├── sec_client.py, sec_models.py          # EDGAR client (pacing, retries); typed contracts
+│   ├── filing_cache.py, snapshot_acquisition.py  # filing cache; immutable pinned snapshots
+│   ├── filing_extractor.py, passages.py      # HTML → blocks → passages with citation ids
+│   ├── retrieval.py, semantic_retrieval.py   # BM25 (default); optional semantic experiment
+│   ├── evaluation.py           # retrieval evaluation harness
+│   ├── company_facts.py, financial_tools.py  # XBRL facts; identity, periods, comparisons
+│   ├── analysis.py             # comparison + verified commentary, no model (explain_change)
+│   ├── request_scope.py        # the question's scope, read deterministically
+│   ├── agent.py                # tool-calling loop, tools, draft schema, ScriptedModel
+│   ├── grounding.py            # draft validation and server-side rendering
+│   ├── llm_provider.py         # OpenAI-compatible Chat Completions adapter (httpx)
+│   ├── live_agent.py           # live CLI: ask, eval (diagnostics, usage, cost)
+│   └── agent_eval.py           # scripted agent evaluation v1 and v2
+└── tests/                      # 20 test modules + fixtures; never call SEC or a provider
 ```
 
-There are no subfolders. SEC code is split into two flat modules because they have different jobs: `sec_client.py` handles transport (HTTP, pacing, retries, parsing) and `sec_models.py` holds the data contracts that later milestones will import. A folder is created only once several modules genuinely belong together (D-017).
+The pinned data (`data/sec-cache`) and the optional embedding model (`data/models`) are git-ignored.
 
-### 4.2 Indicative future capabilities (not created now)
+### 4.2 Not built in the core phase
 
-Ingestion, storage (Postgres/pgvector), retrieval, calculations, LLM access, the agent loop, evals, observability, and the web UI (Next.js, in a separate directory). Each is added only in its milestone, and starts as a single module rather than a folder.
+Ingestion for more companies, storage (Postgres/pgvector), an HTTP research endpoint, observability and a web UI. Retrieval, calculations, LLM access, the agent loop and evaluations were built (§2).
 
 ---
 
@@ -1661,7 +1828,7 @@ Environment and lockfile management uses **`uv`** (already installed). It can in
 
 ---
 
-## 10. Deferred and out of scope (as of Milestone 2.4 B1)
+## 10. Deferred and out of scope (historical list from Milestone 2.4 B1; see the end of this section for the final state)
 
 **Explicitly deferred:**
 - Older submission pages (R12).
@@ -1670,6 +1837,10 @@ Environment and lockfile management uses **`uv`** (already installed). It can in
 - Resolving fiscal periods and keeping all inputs to one calculation from the same filing. Both must be designed before calculations (M1 integration review B1/B2).
 
 **Out of scope until their milestones:** database and vector store, LLM, frontend, authentication, background workers, ticker resolution, a concept map, calculations, Docker.
+
+**Final state (core phase closed, 2026-11-14):**
+- **Built since that list:** fiscal period resolution, same-filing calculations, ticker resolution, an exact concept map, an LLM provider adapter.
+- **Still out of scope:** database and vector store, frontend, authentication, background workers, Docker, ingestion beyond the two pinned companies, XBRL sign conventions beyond the three mapped metrics, live re-verification of commentary, unsupported and injection questions.
 
 ---
 

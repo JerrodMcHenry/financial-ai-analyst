@@ -2,29 +2,73 @@
 
 Enterprise Financial AI Analyst: a financial research copilot over public-company SEC filings.
 
-**Status:** Milestone 2.5 complete. SEC filing retrieval, caching and extraction, XBRL Company
-Facts, deterministic passages with offline-verifiable citations (verified in batches), in-memory
-BM25 keyword search (the default retriever), an offline retrieval-evaluation harness with a
-development set, a held-out set and recorded results. Semantic and hybrid retrieval exist as an
-optional experiment that was evaluated and not adopted. M3 (deterministic financial tools and a
-grounded tool-calling agent) is in progress: immutable, hash-verified snapshots for submissions,
-Company Facts and the ticker map, plus exact company identity resolution (M3.2 B1), and five
-snapshots (Apple, JPMorgan Chase, SEC's ticker map) acquired once and pinned in
-`evals/sec_snapshots_v1.json` (M3.2 B2). The raw snapshots stay in the git-ignored cache, so the
-local cache is needed to use them. M3.3 B1 adds fiscal period resolution grounded in filing
-report dates, exact per-company XBRL concepts for revenue, net income and total assets (Apple,
-JPMorgan Chase), and fact selection by explicit policy (`latest_filed`, `original`,
-`same_filing`). M3.3 B2 adds deterministic comparisons: both values from one filing, an exact
-Decimal delta, and a percentage shown only for a positive base, with restatements reported
-separately. M3.4 joins them with BM25 retrieval into one evidence-backed analysis result
-(numbers from the comparison, verified candidate commentary from the same filing, no LLM). M3.5
-B1 adds a provider-independent tool-calling loop, tested with a scripted fake model, that
-produces unvalidated answer drafts. M3.5 B2 validates those drafts deterministically and renders
-the published answer on the server (complete, partial or abstained), with a 26-case offline
-evaluation. M3.6 adds an OpenAI-compatible live provider adapter and a live CLI. M3.6 B3.1
-repairs drafts through the answer tool and, before publishing, checks that the answer's
-comparison matches the company, metric and periods read independently from the question. See [docs/architecture.md](docs/architecture.md) and
+It answers questions such as *"How much did Apple's revenue grow in fiscal 2026 compared with
+fiscal 2025?"* with figures computed deterministically from pinned SEC XBRL data, verified
+filing citations when commentary is asked for, and an explicit **complete / partial /
+abstained** status. A language model chooses which tools to call. It never writes a published
+number, period or citation.
+
+**Status: core engineering phase complete (2026-11-14).** Portfolio summary:
+[docs/case-study.md](docs/case-study.md). Reproducible demo: [docs/demo.md](docs/demo.md).
+Design: [docs/architecture.md](docs/architecture.md). Decisions:
 [docs/decisions.md](docs/decisions.md).
+
+## What it supports
+
+| Area | Supported now |
+|---|---|
+| Companies | Apple Inc. (CIK 0000320193), JPMorgan Chase & Co. (CIK 0000019617) |
+| Metrics (consolidated only) | revenue, net income, total assets |
+| Periods | fiscal years; fiscal quarters 1–3 (Q4 is not reported separately); year-end and quarter-end balances |
+| Questions | a comparison of one metric between two periods (or one period against a year earlier), optionally asking why, what drove it, what management said, or for a quotation |
+| Data | five SEC snapshots pinned by SHA-256 in `evals/sec_snapshots_v1.json`, plus three cached filings (Apple FY2026 10-K and June 2026 10-Q, JPMorgan September 2026 10-Q) |
+
+Anything else abstains: other companies, segment or product metrics ("iPhone net sales"),
+EBITDA and similar, fourth quarters, forecasts, and questions naming two companies or two
+metrics.
+
+## How an answer is produced
+
+1. `request_scope` reads the company, metric, periods, and whether commentary or a quotation
+   is requested, from the question text alone (fixed, documented patterns).
+2. The agent (`agent.py`) gives a model five validated tools: `resolve_company`, `get_fact`,
+   `compare`, `commentary_filing`, `search_commentary`. Every request requires a function
+   call. A correction turn and the last allowed turn may only call `submit_answer`. Limits: 6
+   model turns, 6 tool calls, 90 seconds, one repair.
+3. `financial_tools.compare_periods` computes the comparison: exact concept mapping, fiscal
+   periods grounded in filing report dates, both values from one filing, Decimal arithmetic.
+   `search_commentary` returns BM25-ranked passages from that same filing, each with a
+   citation that is re-verified against the cached bytes.
+4. `grounding.validate_draft` checks the model's draft against what the run's own tools
+   produced: value IDs, subject comparison, request scope, citations, verbatim quotations,
+   attribution.
+5. `grounding.render_answer` writes the published answer on the server: figures, provenance,
+   verified quotations and candidate commentary. The model's own wording is withheld.
+
+## Evaluation
+
+| What | Result | Notes |
+|---|---|---|
+| Offline test suite | **829 passed, 0 skipped** | with the local `data/sec-cache`; without it, pinned-data tests skip |
+| Scripted agent evaluation v2 (`evals/agent_v2.json`) | **28/28 cases** | outcome-based labels; scripted models; measures the pipeline, not LLM reasoning |
+| Scripted agent evaluation v1 (`evals/agent_v1.json`, frozen) | 19/26 | the 7 differences are documented, intended policy changes (M3.7, M3.8.2) |
+| Final targeted live verification (GPT-5.4 mini) | **2/2** | Apple FY2026 revenue and JPMorgan Q3 2026 net income, figures-only; 4 requests, ~$0.01 |
+| Earlier live runs, in order | 0/2, 1/2, 3/8, 0/4, 2/8, 0/2, 1/2 | failures in provider and draft reliability, each diagnosed and fixed offline (architecture §3.2p–§3.2u); the 3/8 and 0/4 runs used the path-specific v1 labels |
+
+Not re-verified live after the final changes: commentary-required questions, unsupported
+questions and prompt injection. They pass the scripted evaluation only.
+
+## Limitations
+
+- Two companies, three consolidated metrics, three cached filings. No ingestion pipeline,
+  database, HTTP research endpoint or UI.
+- The pinned data lives in the git-ignored cache; a fresh clone cannot reproduce the exact
+  pins (re-downloads differ), so the demo and pinned tests need the original `data/sec-cache`.
+- Request scope uses fixed patterns: questions phrased otherwise abstain. Segment detection
+  is deliberately broad.
+- Commentary is chosen by keyword (BM25) retrieval. Citations prove the text is exact, not
+  that it explains the change, so passages are labeled candidates.
+- Live results vary from run to run; the final verification is two cases.
 
 ## Requirements
 
@@ -49,7 +93,8 @@ curl http://127.0.0.1:8000/health
 # {"status":"ok","version":"0.1.0"}
 ```
 
-Interactive API docs are served at http://127.0.0.1:8000/docs.
+Interactive API docs are served at http://127.0.0.1:8000/docs. The service exposes only
+`/health`; questions are answered through the command-line tools below.
 
 ## Test and lint
 
@@ -59,8 +104,10 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
-Tests never call SEC. HTTP is mocked with `httpx.MockTransport`. The fixture in
-`tests/fixtures/` is a trimmed payload in EDGAR's submissions format; its values are illustrative.
+Tests never call SEC or an LLM provider. HTTP is mocked with `httpx.MockTransport`. The
+fixture in `tests/fixtures/` is a trimmed payload in EDGAR's submissions format; its values
+are illustrative. Tests that use the pinned SEC data run only when the local `data/sec-cache`
+is present (829 passed with it); without it they are skipped.
 
 ## Using the SEC client
 
@@ -315,7 +362,7 @@ for quote in answer.quotations:
 
 `ground` checks a draft only against what the run's own tools produced. Every value must
 come from this run's comparison for the same company, metric and periods, and the narrative
-may contain no digits. Every citation must be a verified passage from that comparison's
+is never published. Every citation must be a verified passage from that comparison's
 filing, and every quotation must be an exact substring of one. The published answer is
 rendered by the server: figures and provenance, verified quotations, and candidate
 commentary. The model's own wording and explanations are withheld, because causes can't be
@@ -355,7 +402,11 @@ published only if its comparison matches the company, metric and periods read fr
 question by fixed patterns (`request_scope.py`); otherwise it abstains. Segment and product
 metrics ("iPhone net sales") are not supported and abstain. A question that asks only for
 figures is complete without commentary; one that asks why, what drove a change, or what
-management said needs a verified citation (and a quotation, if one is asked for). Without a key or model
+management said needs a verified citation (and a quotation, if one is asked for). The live
+report shows the structure (never the content) of any failed provider response, and counts
+requests without usage instead of treating their tokens as zero. Every provider request
+requires a function call; on a repair or the last allowed turn, only `submit_answer` is
+offered, and it is forced. Without a key or model
 the command names the missing setting and sends nothing. `uv run pytest` never contacts a
 provider: the adapter is tested against mocked responses. Details:
 [docs/architecture.md](docs/architecture.md) §3.2o.
