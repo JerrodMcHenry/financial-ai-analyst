@@ -21,7 +21,8 @@ separately. M3.4 joins them with BM25 retrieval into one evidence-backed analysi
 B1 adds a provider-independent tool-calling loop, tested with a scripted fake model, that
 produces unvalidated answer drafts. M3.5 B2 validates those drafts deterministically and renders
 the published answer on the server (complete, partial or abstained), with a 26-case offline
-evaluation. A live model comes next (M3.6). See [docs/architecture.md](docs/architecture.md) and
+evaluation. M3.6 B1 adds an OpenAI-compatible live provider adapter and a live CLI; it
+has not yet been run against a real provider. See [docs/architecture.md](docs/architecture.md) and
 [docs/decisions.md](docs/decisions.md).
 
 ## Requirements
@@ -325,3 +326,27 @@ uv run python -m financial_analyst.agent_eval    # 26 labeled cases, scripted mo
 
 The evaluation tests the pipeline under fixed model behaviors (good, bad and adversarial).
 It does not measure how a real LLM reasons.
+
+## Live model (OpenAI-compatible provider)
+
+Set the provider in your environment (or in the git-ignored `.env`; see `.env.example`):
+
+```bash
+export LLM_API_KEY="..."          # never commit it
+export LLM_MODEL="your-model-id"
+# optional: LLM_BASE_URL (default https://api.openai.com/v1), LLM_REQUEST_TIMEOUT_SECONDS,
+# LLM_TEMPERATURE, LLM_INPUT_COST_PER_MTOK / LLM_OUTPUT_COST_PER_MTOK for cost estimates
+```
+
+```bash
+uv run python -m financial_analyst.live_agent ask "How much did Apple's revenue grow in fiscal 2026?"
+uv run python -m financial_analyst.live_agent eval                  # two smoke cases
+uv run python -m financial_analyst.live_agent eval --all --output live.json   # 19 cases
+```
+
+These commands send requests to the provider and may cost money. A question makes at most
+4 requests, and each one resends the conversation so far, including tool outputs. Only the
+server-rendered, grounded answer is printed, never the model's draft. Without a key or model
+the command names the missing setting and sends nothing. `uv run pytest` never contacts a
+provider: the adapter is tested against mocked responses. Details:
+[docs/architecture.md](docs/architecture.md) §3.2o.

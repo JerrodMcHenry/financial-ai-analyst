@@ -608,7 +608,7 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - A fake agent returning canned answers: rejected, because it would not exercise tool selection, validation or limits.
 
 ## D-036 Deterministic grounding: publish only what can be checked mechanically
-**Status:** Proposed (M3.5 B2, 2026-11-14)
+**Status:** Accepted (M3.5 B2, 2026-11-14)
 **Decision:** a draft becomes an answer only through `grounding.validate_draft` and `render_answer` (architecture §3.2n).
 - **Evidence:** the validator checks the draft against `RunEvidence`, the typed objects this run's successful tool calls produced. It never uses the model's account of tool results.
 - **Numbers:** every placeholder must map to a `value_id` produced in this run for the answer's subject comparison (same company, metric and periods). The narrative may contain no digits. Any failure means the answer abstains.
@@ -627,3 +627,22 @@ Nothing here rejects semantic or hybrid retrieval in general.
 - Publishing the model's sentence with server-filled numbers: rejected for now, because the words around a correct number can still misstate direction or cause.
 - Keyword-based causal-claim detection: rejected; it can't establish entailment and invites false confidence.
 - Re-running full citation verification on every answer: optional (`full_reverify`). The run already verified each passage in the same process, and the cheap checks catch changed bytes and altered text.
+
+## D-037 One OpenAI-compatible adapter behind the existing Model interface
+**Status:** Proposed (M3.6 B1, 2026-11-14)
+**Decision:** live models connect only through `llm_provider.OpenAICompatibleModel.complete(messages, tools)` (architecture §3.2o).
+- **Format:** OpenAI-compatible Chat Completions over httpx, with no SDK or new dependency. Tools are functions, and the answer draft is a `submit_answer` function call whose parameters are the `AnswerDraft` schema. Provider call IDs are kept.
+- **Requests:** one per model turn and never retried. Provider errors, malformed responses and timeouts end the run as `model_error`. Each request's timeout never exceeds what is left of the 90-second run.
+- **Configuration:** `LLM_API_KEY`, `LLM_MODEL` and optional `LLM_BASE_URL` from the environment. The key is a `SecretStr`, never logged, and redacted from reported provider text. Configuration errors name settings, never values.
+- **Live use:** only through `python -m financial_analyst.live_agent`, run by a person. The test suite uses mocked providers only.
+- **Unchanged:** the agent loop, tools, limits, grounding validator and server-side renderer. The live answer is the grounded, server-rendered answer; the draft is never printed.
+
+**Why:**
+- The Chat Completions shape is accepted by many providers and local servers, so one adapter covers them without an SDK.
+- A function for the answer gives structured output on any server that supports tool calls, without depending on provider-specific JSON modes.
+- Not retrying keeps cost and run time bounded and visible. A failed request is a failed turn, which the existing loop already handles.
+
+**Alternatives:**
+- A provider SDK: rejected for now (new dependency, hidden retries by default).
+- Provider-native structured output (`response_format`): deferred, because support varies across compatible servers.
+- Live tests inside pytest behind a skip marker: rejected; they would make "0 skipped" meaningless. Live runs stay in the CLI.

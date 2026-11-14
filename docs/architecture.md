@@ -1,6 +1,6 @@
 # Architecture — Enterprise Financial AI Analyst
 
-Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal periods, concept mapping, fact selection) committed; M3.3 B2 (deterministic same-filing comparisons and percentage change) approved; M3.4 (evidence-backed analysis: comparison plus verified candidate commentary, no LLM) committed; M3.5 B1 (provider-independent tool-calling orchestration with a scripted fake model) committed; M3.5 B2 (deterministic grounding, server-rendered answers, offline agent evaluation) awaiting review. No live LLM provider yet. Sections marked "later" are design intent, not commitments.
+Status: **Milestones 0–2.5 complete** (owner-approved). **BM25 is the default retriever.** Semantic and hybrid retrieval are an optional experiment, not adopted (D-028, D-029). **M3 in progress:** M3.1 design approved; M3.2 B1 (immutable snapshots, company identity) committed; M3.2 B2 (five pinned snapshots, manifest `evals/sec_snapshots_v1.json`) committed; M3.3 B1 (fiscal periods, concept mapping, fact selection) committed; M3.3 B2 (deterministic same-filing comparisons and percentage change) approved; M3.4 (evidence-backed analysis: comparison plus verified candidate commentary, no LLM) committed; M3.5 B1 (provider-independent tool-calling orchestration with a scripted fake model) committed; M3.5 B2 (deterministic grounding, server-rendered answers, offline agent evaluation) committed; M3.6 B1 (OpenAI-compatible live provider adapter and live CLI; no live request made yet) awaiting review. A live LLM provider adapter exists but has not been run against a real provider. Sections marked "later" are design intent, not commitments.
 Last updated: 2026-11-14
 
 ---
@@ -972,7 +972,7 @@ A draft is always labeled `draft_label: "unvalidated_draft"` with a fixed notice
 - Apple FY2026 revenue: `resolve_company` → `compare` → `commentary_filing` + `search_commentary` → draft; 4 calls, 4 turns. Values 478,834,000,000 and 416,161,000,000, delta 62,673,000,000, 15.1%; candidates from 10-K Item 7.
 - JPMorgan Q3 2026 net income: `resolve_company` → `compare` → `search_commentary` → draft; 3 calls, 4 turns. 15,305,000,000 vs 14,393,000,000 (prior from the 10-Q's comparative), +912,000,000, 6.3%; first candidate "reported net income of $15.3 billion, up 6%".
 
-### 3.2n Milestone 3.5 B2: grounding validator, server-rendered answers and agent evaluation (awaiting review)
+### 3.2n Milestone 3.5 B2: grounding validator, server-rendered answers and agent evaluation (approved)
 
 Decision: D-036. Code: `grounding.py` (`validate_draft`, `render_answer`, `ground`) and `agent_eval.py` (scripted-model evaluation), plus `evals/agent_v1.json`. Changes to `agent.py`:
 - The run now returns `RunEvidence`: the typed `Comparison`, `Fact` and verified `CandidatePassage` objects its successful tool calls produced. Nothing is added for a failed call.
@@ -1075,6 +1075,87 @@ The first run found one scoring defect: the answer echoes the user's question, w
 - deciding whether any model wording can be published (for example, constrained templates);
 - a research endpoint;
 - reliable MD&A labels for JPMorgan's 10-Q.
+
+### 3.2o Milestone 3.6 B1: live provider adapter and live CLI (awaiting review)
+
+Decision: D-037. Code: `llm_provider.py` (the only provider-specific module) and `live_agent.py` (CLI and live evaluation). `agent_eval.check_case` was factored out of `score_case` so live runs are scored with exactly the same checks. The agent loop, tools, limits, grounding validator and renderer are unchanged and remain authoritative.
+
+```
+live_agent ask "question"
+  load_provider_settings()          LLM_API_KEY, LLM_MODEL missing → named, exit 2, nothing sent
+  load_pinned_data(manifest, cache) five pinned snapshots; filings read from the cache by the tools
+  OpenAICompatibleModel(settings)   one per run
+  run_agent(question, model, …)     same tools, 6 calls, 4 turns, 90 s, 1 repair
+     └─ complete(messages, tools) ─▶ POST {LLM_BASE_URL}/chat/completions   (one request, no retry)
+  ground(run, …)                    validator + server renderer
+  print format_answer(answer)       server-rendered answer, provenance, citations, status; never the draft
+```
+
+**Wire format (OpenAI-compatible Chat Completions, over httpx; no SDK and no new dependency):**
+- **Tools:** each `ToolSpec` becomes a `function` tool with its JSON Schema. A sixth function, `submit_answer`, takes the `AnswerDraft` schema. Calling it, alone, is how the model answers; a plain-content reply is also accepted and parsed as JSON if possible.
+- **Messages:**
+  - system and user messages pass through;
+  - assistant tool calls keep the provider's call IDs, with arguments re-serialized as JSON;
+  - each tool result goes back as a `tool` message with its call's ID, so every result answers its own call.
+- **Parsing:** tool arguments that are not valid JSON are kept as the raw string, so the tool layer answers `invalid_arguments` and the model can correct itself. The response is malformed (`ProviderError`, so the run ends with `model_error`) when it:
+  - has no `choices[0].message`;
+  - is cut off (`finish_reason=length`);
+  - contains a non-function or incomplete tool call, or duplicate IDs;
+  - combines `submit_answer` with other calls;
+  - contains neither tool calls nor content.
+- **Failures:**
+  - HTTP status ≥ 400 → `http_error`; non-JSON body → `malformed_response`; timeout → `timeout`; other transport error → `transport`;
+  - redirects are not followed;
+  - each `complete()` sends exactly one request and never retries;
+  - the run's existing limits (6 tool calls, 4 model turns, one repair) bound the number of requests to at most 4 per question.
+- **Timeouts:** each request's timeout is the smaller of `LLM_REQUEST_TIMEOUT_SECONDS` (default 30, at most 90) and what remains of the 90-second run budget, counted from the adapter's first request. Once the budget is spent, no request is sent. The agent loop's own deadline checks still apply.
+
+**Configuration (environment, or the git-ignored `.env` via pydantic-settings; the code never opens it):**
+- **Required:** `LLM_API_KEY` and `LLM_MODEL`.
+- **Optional:**
+  - `LLM_BASE_URL` (default `https://api.openai.com/v1`; must be https, or http://localhost or http://127.0.0.1 for a local server);
+  - `LLM_REQUEST_TIMEOUT_SECONDS`;
+  - `LLM_TEMPERATURE` (omitted when unset, since some models reject it);
+  - `LLM_INPUT_COST_PER_MTOK` and `LLM_OUTPUT_COST_PER_MTOK` (USD per million tokens, for cost estimates only).
+- **Secret handling:**
+  - the key is a `SecretStr`, sent only in the `Authorization` header;
+  - it is removed from any provider error text that is reported;
+  - configuration errors name settings (`LLM_MODEL (missing)`), never values, because pydantic's own messages can echo inputs;
+  - nothing logs requests, headers or environment variables;
+  - `.env.example` carries placeholders only.
+
+**Live evaluation (`live_agent eval`):**
+- **Cases:** reuses `evals/agent_v1.json`.
+  - Default: the two smoke cases (Apple FY2026 vs FY2025 revenue; JPMorgan Q3 2026 vs Q3 2025 net income).
+  - `--cases` picks specific IDs.
+  - `--all` runs the 19 live-eligible cases: every non-adversarial case, plus the injection case whose attack is in the question itself. The other adversarial cases script a misbehaving model and mean nothing for a live one.
+- **Scoring:** each case runs once with a fresh adapter and is scored by `check_case` (no determinism check). The report gives:
+  - attempted;
+  - valid tool sequences (no unknown tool, no invalid arguments, within budget);
+  - draft success;
+  - grounding pass (no validation issue, among drafted runs);
+  - correct financial answers (figures and context);
+  - status, partial and abstention correctness;
+  - unsupported-content rejection and budget compliance, each with its denominator;
+  - prompt and completion tokens, estimated cost (when prices are set), and total, median and maximum latency.
+- **Status differences:** labels were written for scripted runs, so a live model that takes another valid path (for example, not searching commentary) shows up as a status difference. That is reported, not hidden.
+
+**Offline versus live:**
+- `uv run pytest` is entirely offline. The adapter is tested against `httpx.MockTransport` providers, including one that behaves like a good model by reading tool results from the request, with sockets blocked.
+- Live requests happen only through `live_agent`, run by a person. There are no skipped live tests in the suite.
+- Scripted-model results (§3.2n) are not live-model results.
+
+**Cost considerations:**
+- One question makes at most 4 requests. Each request resends the conversation, including tool outputs: comparisons, plus up to five ~2,000-character passages per search.
+- Prompt tokens therefore grow per turn, and dominate.
+- The smoke test is 2 questions, so at most 8 requests. `--all` is up to 76 requests.
+- Without configured prices, cost is reported as "not estimated".
+
+**Known limitations:**
+- No live request has been made yet: provider-specific quirks are unverified (schema dialect with `$defs`, `tool_choice`, parallel calls, usage fields).
+- Only the Chat Completions format is implemented. No streaming.
+- Model output varies run to run, so live results need repeated sampling before conclusions.
+- A provider that ignores `submit_answer` and replies in prose gets one repair turn, then `invalid_draft`.
 
 ### 3.3 Later milestone: ingestion
 

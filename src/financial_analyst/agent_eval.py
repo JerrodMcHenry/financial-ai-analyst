@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from financial_analyst.agent import (
     MAX_MODEL_TURNS,
     MAX_TOOL_CALLS,
+    AgentRunResult,
     Message,
     ModelTurn,
     ScriptedModel,
@@ -200,7 +201,9 @@ def _excerpt(text: str) -> str:
 # --- Scoring --------------------------------------------------------------------------------
 
 
-def run_case(case: EvalCase, data: PinnedData, cache_dir: Path) -> tuple[Any, GroundedAnswer]:
+def run_case(
+    case: EvalCase, data: PinnedData, cache_dir: Path
+) -> tuple[AgentRunResult, GroundedAnswer]:
     run = run_agent(case.question, scripted_model(case.script), data=data, cache_dir=cache_dir)
     return run, ground(run, data=data, cache_dir=cache_dir)
 
@@ -208,6 +211,23 @@ def run_case(case: EvalCase, data: PinnedData, cache_dir: Path) -> tuple[Any, Gr
 def score_case(case: EvalCase, data: PinnedData, cache_dir: Path) -> CaseResult:
     run, answer = run_case(case, data, cache_dir)
     again_run, again_answer = run_case(case, data, cache_dir)
+    checks, failures = check_case(case, run, answer)
+    repeat = (run.model_dump(), answer.model_dump()) == (again_run.model_dump(),
+                                                         again_answer.model_dump())  # fmt: skip
+    checks["deterministic"] = repeat
+    if not repeat:
+        failures.append("deterministic: a second run differed")
+    return CaseResult(
+        id=case.id, category=case.category, status=answer.status,
+        expected_status=case.expected.status, checks=checks, failures=failures,
+    )  # fmt: skip
+
+
+def check_case(
+    case: EvalCase, run: AgentRunResult, answer: GroundedAnswer
+) -> tuple[dict[str, bool], list[str]]:
+    """Compare one run and its grounded answer with the case's labels. Shared by the
+    scripted evaluation and the live evaluation (llm_provider / live_agent)."""
     expected = case.expected
     failures: list[str] = []
     checks: dict[str, bool] = {}
@@ -258,14 +278,7 @@ def score_case(case: EvalCase, data: PinnedData, cache_dir: Path) -> CaseResult:
               f"missing {missing}, leaked {leaked}")  # fmt: skip
     check("budget", len(run.tool_results) <= MAX_TOOL_CALLS and run.model_turns <= MAX_MODEL_TURNS,
           f"{len(run.tool_results)} calls, {run.model_turns} turns")  # fmt: skip
-    check("deterministic",
-          (run.model_dump(), answer.model_dump()) == (again_run.model_dump(),
-                                                      again_answer.model_dump()),
-          "a second run differed")  # fmt: skip
-    return CaseResult(
-        id=case.id, category=case.category, status=answer.status,
-        expected_status=expected.status, checks=checks, failures=failures,
-    )  # fmt: skip
+    return checks, failures
 
 
 def _period_of(run, rendered) -> tuple:
