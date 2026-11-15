@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "kind": "company_tickers",
+  "cik": null,
+  "source": {
+    "source_url": "https://www.sec.gov/files/company_tickers.json",
+    "retrieved_at": "2026-11-14T02:40:24.743826Z",
+    "http_status": 200,
+    "content_sha256": "391effc6a807ae1752c9d2c351dbecab8f15aa1c59b035a9a28f7955a94feb0f"
+  }
+}

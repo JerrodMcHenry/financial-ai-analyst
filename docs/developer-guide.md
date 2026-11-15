@@ -4,8 +4,8 @@ How to use each component from Python and the command line. These sections were 
 README so that it stays a short overview. The design behind each component is in
 [architecture.md](architecture.md), and the decisions in [decisions.md](decisions.md).
 
-All commands run from the repository root. Anything that reads pinned data needs the local
-`data/sec-cache`. Only the SEC client and `snapshot_acquisition` contact SEC, and only
+All commands run from the repository root. Anything that reads pinned data uses
+`data/sec-cache`, whose 16 pinned files are committed. Only the SEC client and `snapshot_acquisition` contact SEC, and only
 `live_agent` and the Streamlit app contact an LLM provider.
 
 ## Using the SEC client
@@ -45,7 +45,7 @@ with SecClient(settings) as sec:
     document = fetch_filing_document(sec, ten_k, settings.filing_cache_dir)  # SEC only on a miss
 ```
 
-Primary filing documents are cached under `FILING_CACHE_DIR` (default `data/sec-cache`, git-ignored)
+Primary filing documents are cached under `FILING_CACHE_DIR` (default `data/sec-cache`; only the pinned files are committed, new downloads stay git-ignored)
 as exact bytes plus a JSON metadata file. Every read re-verifies the SHA-256, and a cache hit
 returns the original provenance, including when SEC actually served the bytes. Corrupted or
 mismatched entries are treated as misses and replaced after the next download. If the cache
@@ -164,10 +164,10 @@ separately. All returned citations are verified in one batch, which extracts eac
 
 The real dataset, `evals/retrieval_v1.json`, has 20 questions over three pinned filings: Apple's
 fiscal 2026 10-K, Apple's June 2026 10-Q and JPMorgan's September 2026 10-Q. Its BM25
-baseline is `evals/retrieval_v1.baseline.json`. It can only be reproduced from the local filing
-cache. The pins are raw-byte
+baseline is `evals/retrieval_v1.baseline.json`. It can only be reproduced from the committed
+filing cache. The pins are raw-byte
 SHA-256 hashes of the cached copies, and a fresh download of an unchanged filing has been
-observed to differ by a few bytes, so keep `data/sec-cache`. A separate held-out set,
+observed to differ by a few bytes, so do not replace the files in `data/sec-cache`. A separate held-out set,
 `evals/retrieval_v2_heldout.json` (40 questions over the same three filings), is reserved for
 comparing retrieval methods and is never used for tuning. Details:
 [docs/architecture.md](architecture.md) §3.2g.

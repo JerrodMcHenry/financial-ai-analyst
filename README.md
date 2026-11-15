@@ -44,35 +44,45 @@ abstains.
 
 ## Run the demo
 
-**Prerequisites**
-- [uv](https://docs.astral.sh/uv/) and Python 3.12+.
-- The local `data/sec-cache` directory with the pinned SEC data. It is git-ignored and cannot
-  be recreated byte for byte from a fresh clone (see [Limitations](#limitations)).
-- For live answers: an OpenAI-compatible API key and model.
+**Prerequisites:** [uv](https://docs.astral.sh/uv/) and Python 3.12+. The pinned SEC data the
+demo reads (five snapshots and three filings, about 30 MB) is committed under `data/sec-cache`,
+so a fresh clone needs no download and no SEC access.
+
+### Offline, no API key
 
 ```bash
-uv sync --extra ui          # installs the app and the optional Streamlit dependency
+git clone https://github.com/JerrodMcHenry/financial-ai-analyst.git
+cd financial-ai-analyst
+uv sync
+uv run python -m financial_analyst.analysis                              # both example questions
+uv run python -m financial_analyst.agent_eval --dataset evals/agent_v2.json  # 28/28
+```
+
+The first command answers both example questions with the deterministic engine: exact figures,
+fiscal periods, the source filing, and BM25 commentary with verified citations. Expected:
+Apple FY2026 revenue +62,673,000,000 (+15.1%) and JPMorgan Q3 2026 net income +912,000,000
+(+6.3%), both `COMPLETE`. The second runs the full agent pipeline (tools, limits, request scope,
+grounding, rendering) with scripted models; it does not measure a real model's reasoning.
+[docs/demo.md](docs/demo.md) walks through both, with real output. Neither command sends a
+request to SEC or an LLM provider, and no `.env` is needed.
+
+### Optional: the Streamlit app, with a provider key
+
+```bash
+uv sync --extra ui          # adds the optional Streamlit dependency
 cp .env.example .env        # then set OPENAI_API_KEY (or LLM_API_KEY) and LLM_MODEL
 uv run --extra ui streamlit run src/financial_analyst/app.py    # from the repository root
 ```
 
 Open http://localhost:8501, type a question and press **Analyze**. Each question sends a few
-requests to your provider (at most 6). The page shows:
+requests to your provider (at most 6) and costs money. The page shows:
 - the grounded status;
 - the verified figures and percentage change, with a chart;
 - the source filing link;
 - verified quotations and candidate commentary with citation IDs.
 
-It never shows the model's own wording.
-
-**Without an API key**, the same pinned data can be explored offline:
-
-```bash
-uv run python -m financial_analyst.analysis    # both example questions, no model
-```
-
-[docs/demo.md](docs/demo.md) walks through both supported example questions offline, including
-the full agent pipeline driven by a scripted model, with real output.
+It never shows the model's own wording. The app has no offline mode: without a key, **Analyze**
+reports the missing setting and sends nothing.
 
 ## What it can answer
 
@@ -150,9 +160,9 @@ What gets published:
 
 | What | Result | Notes |
 |---|---|---|
-| Offline test suite | **836 passed, 0 skipped** | with the local `data/sec-cache`; without it, pinned-data tests skip. Never calls SEC or a provider |
+| Offline test suite | **836 passed, 0 skipped** with the semantic extra and model; **814 passed, 1 skipped** with plain `uv sync` | the skipped module is the optional semantic retrieval (see [Development](#development)). Never calls SEC or a provider |
 | Scripted agent evaluation v2 ([`evals/agent_v2.json`](evals/agent_v2.json)) | **28/28 cases** | outcome-based labels; scripted models; measures the pipeline, not model reasoning |
-| Scripted agent evaluation v1 ([`evals/agent_v1.json`](evals/agent_v1.json), frozen) | 19/26 | the 7 differences are documented, intended policy changes |
+| Scripted agent evaluation v1 ([`evals/agent_v1.json`](evals/agent_v1.json), frozen) | 19/26 (exits 1) | the 7 failures are expected: documented, intended policy changes since v1, each pinned by a test |
 | Final live verification (GPT-5.4 mini) | **2/2** | Apple FY2026 revenue and JPMorgan Q3 2026 net income, figures-only; 4 requests, about $0.01 |
 | Earlier live runs, in order | 0/2, 1/2, 3/8, 0/4, 2/8, 0/2, 1/2 | provider and draft-reliability failures, each diagnosed and fixed offline; the 3/8 and 0/4 runs used the path-specific v1 labels |
 
@@ -174,9 +184,11 @@ questions and prompt injection. They pass the scripted evaluation only.
 - **Narrow scope:** two companies, three consolidated metrics, three cached filings. There is
   no ingestion pipeline, database, hosted service or authentication; the Streamlit app runs
   locally.
-- **Pinned data not in the repository:** the data lives in the git-ignored `data/sec-cache`. A
-  fresh clone cannot reproduce the exact pins (SEC data changes and re-downloads differ), so the
-  demo and the pinned tests need the original cache.
+- **Pinned data cannot be re-downloaded:** the committed files in `data/sec-cache` are the only
+  copy that matches the pins. SEC's submissions and Company Facts endpoints change as companies
+  file, and a fresh download of an unchanged filing has been observed to differ by a few bytes,
+  so re-acquired data would not match `evals/sec_snapshots_v1.json` and would be refused. The
+  data reflects SEC as of 2026-11-13/14 and is not updated.
 - **Fixed patterns:** request scope abstains on phrasings it does not recognize, and abstains
   broadly on any segment or product name.
 - **Lexical relevance:** commentary is chosen by keyword (BM25) retrieval. Passages are
@@ -188,8 +200,19 @@ questions and prompt injection. They pass the scripted evaluation only.
 
 ```bash
 uv sync                          # runtime + dev dependencies (add --extra ui for the app)
-uv run pytest                    # 836 offline tests
+uv run pytest                    # 814 passed, 1 skipped (the optional semantic module)
 uv run ruff check . && uv run ruff format --check .
+```
+
+With the pinned data present, the suite takes several minutes, mostly re-verifying citations
+against the filings. To run all 836 tests, add the optional semantic extra and install its
+hash-verified embedding model once (about 128 MB into the git-ignored `data/models/`, a
+download from Hugging Face):
+
+```bash
+uv sync --extra semantic
+uv run python -m financial_analyst.semantic_retrieval install
+uv run pytest                    # 836 passed, 0 skipped
 ```
 
 | Command | What it does |
@@ -197,21 +220,39 @@ uv run ruff check . && uv run ruff format --check .
 | `uv run --extra ui streamlit run src/financial_analyst/app.py` | local web app (live provider) |
 | `uv run python -m financial_analyst.analysis` | deterministic comparison plus verified commentary, no model |
 | `uv run python -m financial_analyst.agent_eval --dataset evals/agent_v2.json` | scripted agent evaluation v2 (offline) |
-| `uv run python -m financial_analyst.agent_eval` | scripted agent evaluation v1, frozen (offline) |
+| `uv run python -m financial_analyst.agent_eval` | scripted agent evaluation v1, frozen (offline); 19/26 and exit 1 are expected |
 | `uv run python -m financial_analyst.live_agent ask "QUESTION"` | one live answer in the terminal |
 | `uv run python -m financial_analyst.live_agent eval --dataset evals/agent_v2.json --cases v2-apple-fy-revenue,v2-jpm-q3-net-income` | the final live verification |
 | `uv run python -m financial_analyst.evaluation evals/retrieval_v1.json` | retrieval evaluation (BM25, offline) |
 | `uv run uvicorn financial_analyst.main:create_app --factory` | health-check service (`/health`; needs `SEC_USER_AGENT`) |
 
-**Configuration** (environment or `.env`; see [`.env.example`](.env.example)):
+**Configuration** (environment or `.env`; see [`.env.example`](.env.example)). The offline
+demo, the tests and the scripted evaluations need none of it.
 - **For SEC access and the health service only:** `SEC_USER_AGENT`, your name and a contact
   email, which SEC's fair-access policy requires. The demo, the app and the evaluations read
-  the local cache and do not need it.
+  the committed pinned data and do not need it.
 - **For live answers:** `OPENAI_API_KEY` (or `LLM_API_KEY`) and `LLM_MODEL`.
 - **Optional:** `LLM_BASE_URL`, `LLM_REQUEST_TIMEOUT_SECONDS`, `LLM_TEMPERATURE`, and
   `LLM_INPUT_COST_PER_MTOK` / `LLM_OUTPUT_COST_PER_MTOK` for cost estimates.
 
 Keys stay server-side and are never printed. A missing setting is reported by name only.
+
+## Data provenance
+
+The 16 files under `data/sec-cache` are unmodified copies of public SEC EDGAR data, retrieved
+2026-11-13 and 2026-11-14:
+- **Snapshots** (pinned in [`evals/sec_snapshots_v1.json`](evals/sec_snapshots_v1.json)):
+  SEC's `company_tickers.json`, plus submissions and XBRL Company Facts for Apple Inc.
+  (CIK 0000320193) and JPMorgan Chase & Co. (CIK 0000019617), from `data.sec.gov`.
+- **Filings:** the primary documents of Apple's 10-K (0000320193-26-000026) and 10-Q
+  (0000320193-26-000020), and JPMorgan's 10-Q (0001628280-26-069523), from SEC's EDGAR
+  archive.
+
+Each data file has a small metadata file recording its source URL, retrieval time, HTTP status
+and SHA-256, and is verified against that hash on every load, so a modified file is refused
+rather than used. Source: U.S. Securities and Exchange Commission, EDGAR
+(https://www.sec.gov/edgar). This project is not affiliated with or endorsed by the SEC, Apple
+or JPMorgan Chase.
 
 ## Documentation
 

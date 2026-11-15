@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "kind": "submissions",
+  "cik": "0000320193",
+  "source": {
+    "source_url": "https://data.sec.gov/submissions/CIK0000320193.json",
+    "retrieved_at": "2026-11-14T02:40:25.385399Z",
+    "http_status": 200,
+    "content_sha256": "d7c4a3c888fe60da97ceef8f9b80da4c205e82440c1bc3ba9dcc7316a482a6b1"
+  }
+}

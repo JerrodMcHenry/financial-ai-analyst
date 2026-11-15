@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "filing": {
+    "cik": "0000320193",
+    "accession_number": "0000320193-26-000026",
+    "form": "10-K",
+    "filing_date": "2026-11-03",
+    "report_date": "2026-09-26",
+    "acceptance_datetime": "2026-11-03T13:05:15Z",
+    "primary_document": "aapl-20260926.htm",
+    "is_xbrl": true,
+    "is_inline_xbrl": true,
+    "primary_document_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000026/aapl-20260926.htm"
+  },
+  "source": {
+    "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000026/aapl-20260926.htm",
+    "retrieved_at": "2026-11-13T01:10:50.193115Z",
+    "http_status": 200,
+    "content_sha256": "ce861d597700a0dd1d11eaa87724e7af557beb5c818dbe703c10328e589fa231"
+  }
+}

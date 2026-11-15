@@ -16,13 +16,12 @@ uv sync
 ```
 
 The demo reads the five snapshots pinned in `evals/sec_snapshots_v1.json` and three cached
-filings from the git-ignored `data/sec-cache`. Every snapshot is checked against its SHA-256
-on load.
+filings from `data/sec-cache`, which is committed to the repository. Every snapshot and filing
+is checked against its SHA-256 on load. No `.env` is needed for parts 1–3.
 
-The cache is not in the repository. A fresh clone cannot recreate these exact pins, because
-SEC's data changes over time and re-downloaded bytes differ, so the demo runs on a machine
-with the original cache. Without it the commands stop with a snapshot error, and the pinned
-tests are skipped.
+These committed files are the only copy that matches the pins: SEC's data changes over time and
+re-downloaded bytes differ, so the data cannot be re-acquired. If the files are missing or
+modified, the commands stop with a snapshot error and the pinned tests are skipped.
 
 ## 1. Deterministic comparison and verified commentary (no model)
 
@@ -106,10 +105,13 @@ so the answer is complete without citations.
 ## 3. Offline evaluation
 
 ```bash
-uv run pytest                                                             # 836 passed with the local cache
+uv run pytest                                                             # 814 passed, 1 skipped (semantic module)
 uv run python -m financial_analyst.agent_eval --dataset evals/agent_v2.json  # 28/28
-uv run python -m financial_analyst.agent_eval                               # frozen v1: 19/26, 7 intended differences
+uv run python -m financial_analyst.agent_eval                               # frozen v1: 19/26, 7 intended differences, exit 1
 ```
+
+With the optional semantic extra and its embedding model installed (README, "Development"), the
+test suite reports 836 passed, 0 skipped.
 
 **What the scripted evaluation measures:** each v2 case pairs a question with a fixed model
 behavior (correct, misbehaving or adversarial) and an outcome label (answerable or not, scope,

@@ -18,8 +18,8 @@ Last updated: 2026-11-14
 | Item | Finding |
 |---|---|
 | Code | 21 flat modules in `src/financial_analyst/` (about 8,650 lines): SEC access, snapshots and cache, extraction, passages, retrieval, financial tools, analysis, request scope, agent, grounding, provider adapter, CLIs, evaluations and a local Streamlit page (§4.1). FastAPI serves only `/health`. |
-| Data | Five SEC snapshots pinned by SHA-256 in `evals/sec_snapshots_v1.json`, and three cached filings, in the git-ignored `data/sec-cache`. Tests and evaluations never contact SEC. |
-| Tests | 836 offline tests (pinned-data tests need the local cache). Scripted agent evaluation v2: 28/28. Final live verification (GPT-5.4 mini): 2/2 supported figures-only cases. |
+| Data | Five SEC snapshots pinned by SHA-256 in `evals/sec_snapshots_v1.json`, and three cached filings, in `data/sec-cache`. Only these 16 files are committed (an explicit allowlist in `.gitignore`); the rest of `data/` stays ignored. Tests and evaluations never contact SEC. |
+| Tests | 836 offline tests: 814 pass and the semantic module skips with plain `uv sync`; all 836 pass with the `semantic` extra and its model. Scripted agent evaluation v2: 28/28. Final live verification (GPT-5.4 mini): 2/2 supported figures-only cases. |
 | Git | A dedicated repository on `main`, remote `https://github.com/JerrodMcHenry/financial-ai-analyst.git`. The owner makes every commit. |
 | Tooling | Python ≥ 3.12 (developed on 3.13.5), `uv`, `ruff`, `pytest`; Streamlit as an optional `ui` extra for the local page. No Docker, database or hosted frontend. |
 
@@ -1630,7 +1630,7 @@ enterprise-financial-ai-analyst/
 └── tests/                      # 21 test modules + fixtures; never call SEC or a provider
 ```
 
-The pinned data (`data/sec-cache`) and the optional embedding model (`data/models`) are git-ignored.
+The 16 pinned data files in `data/sec-cache` are committed through an explicit allowlist in `.gitignore`; everything else in `data/`, including the optional embedding model (`data/models`), is git-ignored. The milestone records in §3 describe the cache as git-ignored, which was true when they were written.
 
 ### 4.2 Not built in the core phase
 

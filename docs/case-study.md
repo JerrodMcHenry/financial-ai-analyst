@@ -88,8 +88,9 @@ substituted draft failed draft validation before reaching grounding.
 - **Narrow scope:** two companies, three consolidated metrics, three filings. There is no
   ingestion pipeline, database, HTTP research endpoint or hosted UI (only a minimal local
   Streamlit page).
-- **Data not in the repository:** the pinned data lives in a git-ignored cache that cannot be
-  recreated byte for byte from a fresh clone.
+- **Data cannot be re-acquired:** the pinned data (about 30 MB) is committed so a fresh clone
+  can run the offline demo and tests, but it cannot be recreated byte for byte from SEC, and it
+  is not updated.
 - **Limited live verification:** two figures-only cases in one run after the final changes.
   Commentary, unsupported and injection questions are verified offline only. Live behavior
   varies between runs.

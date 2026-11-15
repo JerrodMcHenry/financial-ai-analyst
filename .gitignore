@@ -22,8 +22,30 @@ dist/
 .coverage
 htmlcov/
 
-# Local data and caches (EDGAR downloads, later milestones)
-data/
+# Local data and caches (EDGAR downloads, models). Everything under data/ stays ignored except
+# the 16 pinned SEC files the demo and tests read (manifest: evals/sec_snapshots_v1.json).
+# Git cannot re-include a file inside an ignored directory, so directories are re-included
+# first and every file is listed explicitly; any new file in data/ remains ignored.
+data/*
+!/data/sec-cache/
+/data/sec-cache/**
+!/data/sec-cache/**/
+!/data/sec-cache/snapshots/company_tickers/all/391effc6a807ae1752c9d2c351dbecab8f15aa1c59b035a9a28f7955a94feb0f.json
+!/data/sec-cache/snapshots/company_tickers/all/391effc6a807ae1752c9d2c351dbecab8f15aa1c59b035a9a28f7955a94feb0f.meta.json
+!/data/sec-cache/snapshots/submissions/0000320193/d7c4a3c888fe60da97ceef8f9b80da4c205e82440c1bc3ba9dcc7316a482a6b1.json
+!/data/sec-cache/snapshots/submissions/0000320193/d7c4a3c888fe60da97ceef8f9b80da4c205e82440c1bc3ba9dcc7316a482a6b1.meta.json
+!/data/sec-cache/snapshots/company_facts/0000320193/f085735b4d08fb116ade18d24247ffabe11df8eb52eae6556b165831f15ef1ad.json
+!/data/sec-cache/snapshots/company_facts/0000320193/f085735b4d08fb116ade18d24247ffabe11df8eb52eae6556b165831f15ef1ad.meta.json
+!/data/sec-cache/snapshots/submissions/0000019617/230e6a8f376248e49d2aa769f816e9cca65fd93f7151b70419881e2a1acdc666.json
+!/data/sec-cache/snapshots/submissions/0000019617/230e6a8f376248e49d2aa769f816e9cca65fd93f7151b70419881e2a1acdc666.meta.json
+!/data/sec-cache/snapshots/company_facts/0000019617/5c6e52a9e2a27ec66dafa43b7b31d23f09d6fbca9487937ce98d1d499220e3a0.json
+!/data/sec-cache/snapshots/company_facts/0000019617/5c6e52a9e2a27ec66dafa43b7b31d23f09d6fbca9487937ce98d1d499220e3a0.meta.json
+!/data/sec-cache/filings/0000320193/000032019326000026/aapl-20260926.htm
+!/data/sec-cache/filings/0000320193/000032019326000026/aapl-20260926.htm.json
+!/data/sec-cache/filings/0000320193/000032019326000020/aapl-20260627.htm
+!/data/sec-cache/filings/0000320193/000032019326000020/aapl-20260627.htm.json
+!/data/sec-cache/filings/0000019617/000162828026069523/jpm-20260930.htm
+!/data/sec-cache/filings/0000019617/000162828026069523/jpm-20260930.htm.json
 .cache/
 
 # OS / editor

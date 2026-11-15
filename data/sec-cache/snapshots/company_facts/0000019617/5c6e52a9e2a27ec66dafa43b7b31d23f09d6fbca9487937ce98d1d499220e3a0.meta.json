@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "kind": "company_facts",
+  "cik": "0000019617",
+  "source": {
+    "source_url": "https://data.sec.gov/api/xbrl/companyfacts/CIK0000019617.json",
+    "retrieved_at": "2026-11-14T02:40:26.910877Z",
+    "http_status": 200,
+    "content_sha256": "5c6e52a9e2a27ec66dafa43b7b31d23f09d6fbca9487937ce98d1d499220e3a0"
+  }
+}
