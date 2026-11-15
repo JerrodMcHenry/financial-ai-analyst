@@ -6,7 +6,8 @@ Two supported questions, answered from the pinned SEC data:
 2. *How did JPMorgan's net income for the third quarter of 2026 compare with the third quarter of 2025?*
 
 Parts 1–3 run **offline**: no SEC request and no LLM provider. Part 4 calls a live model and
-is optional. The outputs below were produced by these commands on 2026-11-14.
+is optional. The quickest live demonstration is the local Streamlit app (README, "Run the
+demo"). The outputs below were produced by these commands on 2026-11-14.
 
 ## Prerequisites
 
@@ -105,7 +106,7 @@ so the answer is complete without citations.
 ## 3. Offline evaluation
 
 ```bash
-uv run pytest                                                             # 829 passed with the local cache
+uv run pytest                                                             # 836 passed with the local cache
 uv run python -m financial_analyst.agent_eval --dataset evals/agent_v2.json  # 28/28
 uv run python -m financial_analyst.agent_eval                               # frozen v1: 19/26, 7 intended differences
 ```

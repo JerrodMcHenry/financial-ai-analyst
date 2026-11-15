@@ -34,7 +34,7 @@ re-verified byte for byte, and the system says *partial* or *abstained* instead 
   - server-side rendering of every published figure and label.
 
   The model never writes a published number, period or citation.
-- **Evaluation:** 829 offline tests, plus an outcome-based scripted evaluation (28 cases) that
+- **Evaluation:** 836 offline tests, plus an outcome-based scripted evaluation (28 cases) that
   scores answering the question, figures, context, citation integrity, abstention, status,
   reliability, budget and safe content independently.
 
@@ -86,7 +86,8 @@ substituted draft failed draft validation before reaching grounding.
 ## Limitations
 
 - **Narrow scope:** two companies, three consolidated metrics, three filings. There is no
-  ingestion pipeline, database, HTTP research endpoint or UI.
+  ingestion pipeline, database, HTTP research endpoint or hosted UI (only a minimal local
+  Streamlit page).
 - **Data not in the repository:** the pinned data lives in a git-ignored cache that cannot be
   recreated byte for byte from a fresh clone.
 - **Limited live verification:** two figures-only cases in one run after the final changes.
@@ -102,4 +103,5 @@ substituted draft failed draft validation before reaching grounding.
 
 - Ingestion for more companies and metrics, with snapshot manifests per release.
 - A repeated-sampling live evaluation on the full v2 set, to measure variance.
-- A research HTTP endpoint and a minimal UI over the grounded answer.
+- A research HTTP endpoint behind the grounded answer, and a hosted version of the local
+  Streamlit page.

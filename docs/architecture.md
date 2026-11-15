@@ -17,11 +17,11 @@ Last updated: 2026-11-14
 
 | Item | Finding |
 |---|---|
-| Code | 20 flat modules in `src/financial_analyst/` (about 8,400 lines): SEC access, snapshots and cache, extraction, passages, retrieval, financial tools, analysis, request scope, agent, grounding, provider adapter, CLIs and evaluations (§4.1). FastAPI serves only `/health`. |
+| Code | 21 flat modules in `src/financial_analyst/` (about 8,650 lines): SEC access, snapshots and cache, extraction, passages, retrieval, financial tools, analysis, request scope, agent, grounding, provider adapter, CLIs, evaluations and a local Streamlit page (§4.1). FastAPI serves only `/health`. |
 | Data | Five SEC snapshots pinned by SHA-256 in `evals/sec_snapshots_v1.json`, and three cached filings, in the git-ignored `data/sec-cache`. Tests and evaluations never contact SEC. |
-| Tests | 829 offline tests (pinned-data tests need the local cache). Scripted agent evaluation v2: 28/28. Final live verification (GPT-5.4 mini): 2/2 supported figures-only cases. |
+| Tests | 836 offline tests (pinned-data tests need the local cache). Scripted agent evaluation v2: 28/28. Final live verification (GPT-5.4 mini): 2/2 supported figures-only cases. |
 | Git | A dedicated repository on `main`, remote `https://github.com/JerrodMcHenry/financial-ai-analyst.git`. The owner makes every commit. |
-| Tooling | Python ≥ 3.12 (developed on 3.13.5), `uv`, `ruff`, `pytest`. No Docker, database or frontend. |
+| Tooling | Python ≥ 3.12 (developed on 3.13.5), `uv`, `ruff`, `pytest`; Streamlit as an optional `ui` extra for the local page. No Docker, database or hosted frontend. |
 
 Decisions are recorded in `docs/decisions.md`.
 
@@ -95,12 +95,14 @@ A draft is rejected for repair when it fails the schema, or cites a passage ID t
 The model's note and explanations are withheld, recorded only by kind and length. The answer object contains no model-written text except verified quotations.
 
 **Evaluation:**
-- `pytest`: 829 offline tests;
+- `pytest`: 836 offline tests;
 - `agent_eval`: v1 (frozen, path-specific labels) and v2 (outcome-based labels, ten dimensions);
 - `live_agent eval`: live runs scored with the same checks, with per-case diagnostics (tool sequence, error codes, response shapes, usage, cost);
 - the retrieval evaluation harness (§3.2g–§3.2h).
 
-**Original design not built in the core phase:** ingestion into a database with a vector store, an HTTP research endpoint, a UI (§3.3, §3.4, §10).
+**Interface:** a minimal local Streamlit page (`app.py`) runs the same flow as `live_agent ask`, and shows only fields of the grounded answer, never the model's own text.
+
+**Original design not built in the core phase:** ingestion into a database with a vector store, an HTTP research endpoint, a hosted UI (§3.3, §3.4, §10).
 
 ---
 
@@ -1601,7 +1603,8 @@ enterprise-financial-ai-analyst/
 │   ├── architecture.md         # this document
 │   ├── decisions.md            # decision log (D-001 – D-043)
 │   ├── demo.md                 # reproducible demonstration
-│   └── case-study.md           # portfolio summary
+│   ├── case-study.md           # portfolio summary
+│   └── developer-guide.md      # component usage from Python and the command line
 ├── evals/
 │   ├── sec_snapshots_v1.json   # manifest pinning the five SEC snapshots by SHA-256
 │   ├── agent_v1.json           # scripted agent evaluation, frozen (path-specific labels)
@@ -1622,8 +1625,9 @@ enterprise-financial-ai-analyst/
 │   ├── grounding.py            # draft validation and server-side rendering
 │   ├── llm_provider.py         # OpenAI-compatible Chat Completions adapter (httpx)
 │   ├── live_agent.py           # live CLI: ask, eval (diagnostics, usage, cost)
+│   ├── app.py                  # minimal local Streamlit page over the live agent
 │   └── agent_eval.py           # scripted agent evaluation v1 and v2
-└── tests/                      # 20 test modules + fixtures; never call SEC or a provider
+└── tests/                      # 21 test modules + fixtures; never call SEC or a provider
 ```
 
 The pinned data (`data/sec-cache`) and the optional embedding model (`data/models`) are git-ignored.

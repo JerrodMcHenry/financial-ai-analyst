@@ -1,436 +1,224 @@
-# financial-ai-analyst
+# Financial AI Analyst
 
-Enterprise Financial AI Analyst: a financial research copilot over public-company SEC filings.
+A research assistant for public-company SEC filings that **cannot publish a number it did not
+compute**. Ask *"How much did Apple's revenue grow in fiscal 2026 compared with fiscal 2025?"*
+and you get exact figures computed from SEC XBRL data, the filing they came from, verified
+filing citations when you ask for commentary, and an explicit **complete / partial /
+abstained** status. A language model decides which tools to call; the server computes and
+writes every figure, period and citation.
 
-It answers questions such as *"How much did Apple's revenue grow in fiscal 2026 compared with
-fiscal 2025?"* with figures computed deterministically from pinned SEC XBRL data, verified
-filing citations when commentary is asked for, and an explicit **complete / partial /
-abstained** status. A language model chooses which tools to call. It never writes a published
-number, period or citation.
+## Screenshot
 
-**Status: core engineering phase complete (2026-11-14).** Portfolio summary:
-[docs/case-study.md](docs/case-study.md). Reproducible demo: [docs/demo.md](docs/demo.md).
-Design: [docs/architecture.md](docs/architecture.md). Decisions:
-[docs/decisions.md](docs/decisions.md).
+> **Screenshot placeholder.** Save a screenshot of the Streamlit app as
+> `docs/images/streamlit-demo.png`, then replace this note with:
+> `![Financial AI Analyst: a grounded answer in the Streamlit app](docs/images/streamlit-demo.png)`
 
-## What it supports
+## The problem
 
-| Area | Supported now |
+Language models answering financial questions produce numbers, fiscal periods and citations
+that look plausible and can be wrong:
+- a figure from the wrong filing or a restated year;
+- a calendar quarter mistaken for a fiscal one;
+- a "quote" that is not in the document.
+
+In financial research, a confident wrong number is worse than no answer. This project keeps
+the model away from the facts. It may only:
+- choose deterministic tools;
+- point to their results by ID.
+
+Every published value is computed from official SEC data, checked against the question that
+was asked, and rendered by the server. When that cannot be done, the answer says partial or
+abstains.
+
+## Core technologies
+
+| Area | Used |
+|---|---|
+| Language and tooling | Python 3.12+, [uv](https://docs.astral.sh/uv/), pytest, ruff |
+| Data contracts | Pydantic v2 (frozen models, strict tool-argument validation) |
+| SEC data | SEC EDGAR submissions, XBRL Company Facts and filing HTML, via `httpx` (paced, bounded retries); immutable snapshots pinned by SHA-256 |
+| Filing text | BeautifulSoup extraction, deterministic passages, in-house BM25 retrieval, byte-level citation verification |
+| Financial engine | Exact XBRL concept mapping, fiscal periods from filing report dates, `Decimal` arithmetic |
+| LLM | Provider-independent tool-calling loop; OpenAI-compatible Chat Completions adapter over `httpx` (no SDK, no agent framework); verified with GPT-5.4 mini |
+| Interface | Streamlit (local demo), plus command-line tools; FastAPI serves a health check |
+
+## Run the demo
+
+**Prerequisites**
+- [uv](https://docs.astral.sh/uv/) and Python 3.12+.
+- The local `data/sec-cache` directory with the pinned SEC data. It is git-ignored and cannot
+  be recreated byte for byte from a fresh clone (see [Limitations](#limitations)).
+- For live answers: an OpenAI-compatible API key and model.
+
+```bash
+uv sync --extra ui          # installs the app and the optional Streamlit dependency
+cp .env.example .env        # then set OPENAI_API_KEY (or LLM_API_KEY) and LLM_MODEL
+uv run --extra ui streamlit run src/financial_analyst/app.py    # from the repository root
+```
+
+Open http://localhost:8501, type a question and press **Analyze**. Each question sends a few
+requests to your provider (at most 6). The page shows:
+- the grounded status;
+- the verified figures and percentage change, with a chart;
+- the source filing link;
+- verified quotations and candidate commentary with citation IDs.
+
+It never shows the model's own wording.
+
+**Without an API key**, the same pinned data can be explored offline:
+
+```bash
+uv run python -m financial_analyst.analysis    # both example questions, no model
+```
+
+[docs/demo.md](docs/demo.md) walks through both supported example questions offline, including
+the full agent pipeline driven by a scripted model, with real output.
+
+## What it can answer
+
+| Area | Supported |
 |---|---|
 | Companies | Apple Inc. (CIK 0000320193), JPMorgan Chase & Co. (CIK 0000019617) |
 | Metrics (consolidated only) | revenue, net income, total assets |
 | Periods | fiscal years; fiscal quarters 1–3 (Q4 is not reported separately); year-end and quarter-end balances |
-| Questions | a comparison of one metric between two periods (or one period against a year earlier), optionally asking why, what drove it, what management said, or for a quotation |
-| Data | five SEC snapshots pinned by SHA-256 in `evals/sec_snapshots_v1.json`, plus three cached filings (Apple FY2026 10-K and June 2026 10-Q, JPMorgan September 2026 10-Q) |
+| Questions | one metric compared between two periods (or one period against the year before), optionally asking why, what drove it, what management said, or for a quotation |
+| Data | five SEC snapshots pinned in [`evals/sec_snapshots_v1.json`](evals/sec_snapshots_v1.json), plus three cached filings (Apple FY2026 10-K and June 2026 10-Q, JPMorgan September 2026 10-Q) |
 
-Anything else abstains: other companies, segment or product metrics ("iPhone net sales"),
-EBITDA and similar, fourth quarters, forecasts, and questions naming two companies or two
-metrics.
+Anything else abstains rather than guessing. That includes:
+- other companies;
+- segment or product metrics ("iPhone net sales");
+- EBITDA and other unmapped metrics;
+- fourth quarters and forecasts;
+- questions naming two companies or two metrics.
 
-## How an answer is produced
+## How it works
 
-1. `request_scope` reads the company, metric, periods, and whether commentary or a quotation
-   is requested, from the question text alone (fixed, documented patterns).
-2. The agent (`agent.py`) gives a model five validated tools: `resolve_company`, `get_fact`,
-   `compare`, `commentary_filing`, `search_commentary`. Every request requires a function
-   call. A correction turn and the last allowed turn may only call `submit_answer`. Limits: 6
-   model turns, 6 tool calls, 90 seconds, one repair.
-3. `financial_tools.compare_periods` computes the comparison: exact concept mapping, fiscal
-   periods grounded in filing report dates, both values from one filing, Decimal arithmetic.
-   `search_commentary` returns BM25-ranked passages from that same filing, each with a
-   citation that is re-verified against the cached bytes.
-4. `grounding.validate_draft` checks the model's draft against what the run's own tools
-   produced: value IDs, subject comparison, request scope, citations, verbatim quotations,
-   attribution.
-5. `grounding.render_answer` writes the published answer on the server: figures, provenance,
-   verified quotations and candidate commentary. The model's own wording is withheld.
+```
+question ─▶ request scope: company, metric, periods, commentary asked?  (read from the question alone)
+    │
+    ▼
+agent loop ◀──▶ model (live provider, or a scripted model in tests)
+    │   tools: resolve_company · get_fact · compare · commentary_filing · search_commentary
+    │   every turn must call a function; repair and last turns may only call submit_answer
+    │   limits: 6 model turns, 6 tool calls, 90 seconds, 1 repair
+    ▼
+run evidence: comparisons, facts and verified passages produced by this run's tools
+    │
+    ▼
+grounding: check the model's draft against the run evidence and the request scope
+    │
+    ▼
+server-rendered answer: complete | partial | abstained
+```
+
+- **`financial_tools.compare_periods`:** computes each comparison deterministically.
+  - It uses the company's exact XBRL concept and fiscal periods taken from filing report dates.
+  - Both values come from one filing; restatements in other filings are reported separately.
+  - The arithmetic is `Decimal`. The percentage is shown half-even to one decimal, and only for
+    a positive base.
+- **`search_commentary`:** returns BM25-ranked passages from that same filing (its MD&A when
+  the section label is reliable). Each passage has a citation ID that pins the exact source
+  bytes.
+- **The draft:** the model submits which comparison it is answering, the value IDs and citation
+  IDs it relies on, and optional quotations. It never submits a figure.
+
+The full design is in [docs/architecture.md](docs/architecture.md) §2; decisions are in
+[docs/decisions.md](docs/decisions.md).
+
+## How figures and citations are verified
+
+The validator checks the draft only against what this run's own tools produced, never against
+what the model claims they returned.
+
+| Check | Failure means |
+|---|---|
+| The answer's comparison was produced in this run, and every value ID belongs to it | **abstained**: no figures shown |
+| The comparison matches the company, metric and periods read independently from the question (a Q4 question answered with fiscal years, or "iPhone net sales" answered with total revenue, is rejected) | **abstained** |
+| Each citation is a passage this run retrieved from the comparison's filing, and the cached bytes still match it | the citation is dropped; **partial** |
+| Each quotation is an exact substring of its passage, and "management" only for MD&A text | the quotation is dropped; **partial** |
+| If the question asks for commentary or a quotation, at least one verified one exists | **partial** |
+
+What gets published:
+- **Written by the server:** the statement, figures, provenance (comparison ID, XBRL concept,
+  filing and Company Facts SHA-256) and attribution.
+- **Withheld:** the model's own note and any explanations, kept only in the run record.
+- **The only text taken from the filing:** verified quotations, and passages labeled as
+  candidate commentary, since a verified citation proves the text is exact, not that it
+  explains the change.
 
 ## Evaluation
 
 | What | Result | Notes |
 |---|---|---|
-| Offline test suite | **829 passed, 0 skipped** | with the local `data/sec-cache`; without it, pinned-data tests skip |
-| Scripted agent evaluation v2 (`evals/agent_v2.json`) | **28/28 cases** | outcome-based labels; scripted models; measures the pipeline, not LLM reasoning |
-| Scripted agent evaluation v1 (`evals/agent_v1.json`, frozen) | 19/26 | the 7 differences are documented, intended policy changes (M3.7, M3.8.2) |
-| Final targeted live verification (GPT-5.4 mini) | **2/2** | Apple FY2026 revenue and JPMorgan Q3 2026 net income, figures-only; 4 requests, ~$0.01 |
-| Earlier live runs, in order | 0/2, 1/2, 3/8, 0/4, 2/8, 0/2, 1/2 | failures in provider and draft reliability, each diagnosed and fixed offline (architecture §3.2p–§3.2u); the 3/8 and 0/4 runs used the path-specific v1 labels |
+| Offline test suite | **836 passed, 0 skipped** | with the local `data/sec-cache`; without it, pinned-data tests skip. Never calls SEC or a provider |
+| Scripted agent evaluation v2 ([`evals/agent_v2.json`](evals/agent_v2.json)) | **28/28 cases** | outcome-based labels; scripted models; measures the pipeline, not model reasoning |
+| Scripted agent evaluation v1 ([`evals/agent_v1.json`](evals/agent_v1.json), frozen) | 19/26 | the 7 differences are documented, intended policy changes |
+| Final live verification (GPT-5.4 mini) | **2/2** | Apple FY2026 revenue and JPMorgan Q3 2026 net income, figures-only; 4 requests, about $0.01 |
+| Earlier live runs, in order | 0/2, 1/2, 3/8, 0/4, 2/8, 0/2, 1/2 | provider and draft-reliability failures, each diagnosed and fixed offline; the 3/8 and 0/4 runs used the path-specific v1 labels |
+
+**How reliability was reached:** the earlier live runs found real problems.
+- **Drafts:** a contradictory repair protocol, and validation rules that rejected correct drafts.
+- **Provider:** the model ending turns with empty messages.
+- **Accounting:** understated costs.
+- **Off-question answers:** one off-question answer was published: a Q4 question answered with
+  full-year figures. Request-scope validation was added in response.
+
+No run published an incorrect figure. The story is told run by run in
+[docs/case-study.md](docs/case-study.md).
 
 Not re-verified live after the final changes: commentary-required questions, unsupported
 questions and prompt injection. They pass the scripted evaluation only.
 
 ## Limitations
 
-- Two companies, three consolidated metrics, three cached filings. No ingestion pipeline,
-  database, HTTP research endpoint or UI.
-- The pinned data lives in the git-ignored cache; a fresh clone cannot reproduce the exact
-  pins (re-downloads differ), so the demo and pinned tests need the original `data/sec-cache`.
-- Request scope uses fixed patterns: questions phrased otherwise abstain. Segment detection
-  is deliberately broad.
-- Commentary is chosen by keyword (BM25) retrieval. Citations prove the text is exact, not
-  that it explains the change, so passages are labeled candidates.
-- Live results vary from run to run; the final verification is two cases.
+- **Narrow scope:** two companies, three consolidated metrics, three cached filings. There is
+  no ingestion pipeline, database, hosted service or authentication; the Streamlit app runs
+  locally.
+- **Pinned data not in the repository:** the data lives in the git-ignored `data/sec-cache`. A
+  fresh clone cannot reproduce the exact pins (SEC data changes and re-downloads differ), so the
+  demo and the pinned tests need the original cache.
+- **Fixed patterns:** request scope abstains on phrasings it does not recognize, and abstains
+  broadly on any segment or product name.
+- **Lexical relevance:** commentary is chosen by keyword (BM25) retrieval. Passages are
+  labeled candidates, and the model's interpretations are withheld, not verified.
+- **Limited live verification:** live results vary from run to run, and the final live check
+  was two cases in one run.
 
-## Local web interface (Streamlit)
-
-A minimal page for asking a question in the browser and seeing the grounded answer. It needs
-the local `data/sec-cache` and a provider key and model in the environment or `.env` (see
-"Live model" below). Each question sends requests to the provider.
-
-```bash
-uv sync --extra ui                                    # adds Streamlit (optional extra)
-uv run --extra ui streamlit run src/financial_analyst/app.py   # run from the repository root
-```
-
-Then open http://localhost:8501.
-
-**What the page shows:**
-- the grounded status (complete, partial or abstained);
-- the verified figures, change and percentage;
-- a bar chart of the two values;
-- the source filing link, verified quotations, and candidate commentary with citation IDs.
-
-All of these come from the server-rendered answer. The model's own note and explanations, and
-any rejected quotation, are never shown. Missing credentials, a missing cache or a provider
-failure are reported by name, without values. The page runs locally only: no authentication,
-no deployment.
-
-## Requirements
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/)
-
-## Setup
+## Development
 
 ```bash
-uv sync                    # creates .venv and installs runtime + dev dependencies
-cp .env.example .env       # then set SEC_USER_AGENT to your name and contact email
+uv sync                          # runtime + dev dependencies (add --extra ui for the app)
+uv run pytest                    # 836 offline tests
+uv run ruff check . && uv run ruff format --check .
 ```
 
-`SEC_USER_AGENT` is required. The app refuses to start without one that includes a contact
-email, because SEC's fair-access policy requires automated clients to identify themselves.
-
-## Run
-
-```bash
-uv run uvicorn financial_analyst.main:create_app --factory --reload
-curl http://127.0.0.1:8000/health
-# {"status":"ok","version":"0.1.0"}
-```
-
-Interactive API docs are served at http://127.0.0.1:8000/docs. The service exposes only
-`/health`; questions are answered through the command-line tools below.
-
-## Test and lint
-
-```bash
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-```
-
-Tests never call SEC or an LLM provider. HTTP is mocked with `httpx.MockTransport`. The
-fixture in `tests/fixtures/` is a trimmed payload in EDGAR's submissions format; its values
-are illustrative. Tests that use the pinned SEC data run only when the local `data/sec-cache`
-is present (829 passed with it); without it they are skipped.
-
-## Using the SEC client
-
-```python
-from financial_analyst.config import Settings
-from financial_analyst.sec_client import SecClient
-
-with SecClient(Settings()) as sec:
-    # Discovery: which filings exist (metadata only)
-    submissions = sec.get_submissions("320193")  # Apple Inc.
-    ten_k = next(f for f in submissions.recent_filings if f.form == "10-K")
-    print(ten_k.accession_number, ten_k.primary_document_url)
-
-    # Retrieval: download that filing's primary HTML document (10-K/10-Q and amendments only)
-    document = sec.get_filing_document(ten_k)
-    print(len(document.content), document.source.content_sha256)
-```
-
-**Discovery vs retrieval.** `get_submissions` *discovers* filings and returns trusted metadata:
-accession number, form and primary document name. `get_filing_document` *retrieves* one
-filing's primary document from the EDGAR archive URL derived from that metadata. It never
-searches or crawls. `document.content` holds the exact bytes SEC returned (after HTTP
-decompression). Turning them into text is a separate, offline step (below).
-
-The client paces requests (default 4/s, never more than SEC's 10/s), uses explicit timeouts,
-and retries 429/5xx/timeouts at most 3 times with exponential backoff (constants at the top
-of `sec_client.py`).
-
-## Caching filing documents
-
-```python
-from financial_analyst.filing_cache import fetch_filing_document
-
-settings = Settings()
-with SecClient(settings) as sec:
-    document = fetch_filing_document(sec, ten_k, settings.filing_cache_dir)  # SEC only on a miss
-```
-
-Primary filing documents are cached under `FILING_CACHE_DIR` (default `data/sec-cache`, git-ignored)
-as exact bytes plus a JSON metadata file. Every read re-verifies the SHA-256, and a cache hit
-returns the original provenance, including when SEC actually served the bytes. Corrupted or
-mismatched entries are treated as misses and replaced after the next download. If the cache
-can't be written, a warning is logged and the downloaded document is still returned. The cache
-directory must not be writable by untrusted users. Deleting it is always safe. Extracted
-content is not cached; extraction is fast and deterministic. Details:
-[docs/architecture.md](docs/architecture.md) §3.2c.
-
-## Extracting filing content
-
-```python
-from financial_analyst.filing_extractor import extract_filing
-
-extracted = extract_filing(document)  # offline; does not modify `document`
-print(extracted.diagnostics.sections_found, extracted.diagnostics.warnings)
-for block in extracted.blocks[:10]:
-    print(block.index, block.kind, block.section, block.dom_path, block.text[:80])
-```
-
-Each block is a heading, paragraph or table, in document order. Tables keep their cell grid in
-`block.rows`. `dom_path` plus the document's SHA-256 says exactly where each block came from.
-Sections are assigned only when their headings are unambiguous: `"Item 1A"` for 10-Ks and
-Part-qualified `"Part I, Item 2"` for 10-Qs, whose item numbers repeat across Parts. Each result records
-`extractor_version`; together with the source SHA-256 it identifies the exact blocks. See
-[docs/architecture.md](docs/architecture.md) §3.2b for the guarantees and limitations.
-
-## Passages and citations
-
-```python
-from financial_analyst.passages import build_passages, parse_citation_id, verify_citation
-
-passages = build_passages(extracted)  # offline and deterministic
-passage = passages[0]
-print(passage.section, passage.kind, passage.citation_id)
-
-result = verify_citation(passage.citation_id, passage, settings.filing_cache_dir)
-print(result.status, result.document_url, [b.dom_path for b in result.blocks])
-```
-
-A passage is a run of whole blocks, about 2,000 characters at most, that never crosses a section.
-Headings stay with the text after them, a table is never split, and a block longer than 2,000
-characters is cut at sentence ends with exact character offsets. Every block is kept, including
-page footers. Filings without section labels still get passages (`section=None`).
-
-A citation id names the filing, the full SHA-256 of the source bytes, the extractor and
-passage-builder versions, the block/character range and a text-hash prefix:
-
-```
-sec-psg:0000320193:0000320193-26-000026:aapl-20260926.htm:<64 hex>:x2:p1:b4.0-6.41:t<16 hex>
-```
-
-`verify_citation` reads only the filing cache and never contacts SEC. It re-extracts the
-document, rebuilds its passages and returns `verified` with the source blocks and document URL,
-or the reason the citation no longer holds: `invalid_citation`, `source_unavailable`,
-`source_changed`, `extractor_changed`, `builder_changed`, `boundaries_changed` or
-`text_changed`. A citation is never re-pointed to other text. Details:
-[docs/architecture.md](docs/architecture.md) §3.2e.
-
-## Keyword search
-
-```python
-from financial_analyst.retrieval import KeywordIndex, select_latest_filing
-
-ten_k = select_latest_filing(submissions, "10-K")  # by filing date, amendments excluded,
-# chosen only from the filings in `submissions` (older SEC pages aren't fetched)
-# ... fetch_filing_document, extract_filing, build_passages as above, for one or more filings
-index = KeywordIndex(passages)
-for hit in index.search("supply chain suppliers", k=5, section="Item 1A"):
-    print(round(hit.score, 2), hit.matched_terms, hit.citation_id)
-```
-
-`KeywordIndex` ranks passages with Okapi BM25 (k1 = 1.2, b = 0.75), in memory and without
-dependencies. Tokenization lowercases and normalizes Unicode, splits hyphenated words, drops
-thousands separators and a short stopword list, and does no stemming. Repeated query words count
-once, only passages that match at least one word are returned, and equal scores are ordered by
-filing and position. Filters (`section`, `form`, `accession_number`) are exact: a section filter
-returns only passages with exactly that label, so it returns nothing for a filing without
-section labels. Without a section filter, every filing is searchable. Each hit carries the
-unchanged passage and its citation id, ready for `verify_citation`. Details and limitations:
-[docs/architecture.md](docs/architecture.md) §3.2f.
-
-## Evaluating retrieval
-
-```bash
-uv run python -m financial_analyst.evaluation DATASET.json --output report.json
-# reads filings from data/sec-cache by default (--cache-dir to change); never contacts SEC
-```
-
-Semantic and hybrid retrieval are an **optional experiment, not adopted**. On the held-out set,
-hybrid matched BM25 on paraphrase questions (8/20 each) and lost a direct question, so BM25 stays
-the default (D-028, D-029; results in `evals/results/`). To reproduce them, install the optional
-extra and the hash-verified model once:
-
-```bash
-uv sync --extra semantic
-uv run python -m financial_analyst.semantic_retrieval install   # pinned BAAI/bge-small-en-v1.5
-uv run python -m financial_analyst.evaluation evals/retrieval_v1.json --retriever hybrid
-```
-
-The model is loaded only from `data/models/` after every file's SHA-256 is checked; searching
-never uses the network. Embedding the corpus on one CPU thread takes several minutes.
-
-The evaluation reads a dataset that pins each filing by its full SHA-256 and the extractor and
-passage-builder versions, and labels evidence as exact text spans written by reading the
-filings, not by searching them. It loads the filings only from the filing cache (never from
-SEC), searches one combined BM25 index without filters, and reports Hit@5, MRR@10,
-labeled-evidence recall@5, combined evidence coverage@5 and section precision@5, with filtered
-searches reported separately. A passage counts as relevant only if it contains at least 80% of
-a labeled span.
-
-The evaluation is refused (exit code 2, every problem listed) if a document is missing or
-differs from its pin, evidence can't be located exactly once, results aren't repeatable, a
-filtered hit breaks its filter, or any returned citation fails `verify_citation`. Relevance
-misses are results, not errors. Search latency and citation-verification time are reported
-separately. All returned citations are verified in one batch, which extracts each filing once. The fixture dataset tests the harness.
-
-The real dataset, `evals/retrieval_v1.json`, has 20 questions over three pinned filings: Apple's
-fiscal 2026 10-K, Apple's June 2026 10-Q and JPMorgan's September 2026 10-Q. Its BM25
-baseline is `evals/retrieval_v1.baseline.json`. It can only be reproduced from the local filing
-cache. The pins are raw-byte
-SHA-256 hashes of the cached copies, and a fresh download of an unchanged filing has been
-observed to differ by a few bytes, so keep `data/sec-cache`. A separate held-out set,
-`evals/retrieval_v2_heldout.json` (40 questions over the same three filings), is reserved for
-comparing retrieval methods and is never used for tuning. Details:
-[docs/architecture.md](docs/architecture.md) §3.2g.
-
-## XBRL Company Facts
-
-```python
-from datetime import date
-from financial_analyst.company_facts import period_class, select_fact
-
-with SecClient(Settings()) as sec:
-    facts = sec.get_company_facts("320193")  # every fact SEC publishes; not cached
-
-result = select_fact(
-    facts, "us-gaap", "Revenues", "USD", date(2023, 10, 1), date(2024, 9, 28), policy="latest_filed"
-)
-print(result.selected, result.conflicting_values, result.reason)
-```
-
-Each SEC row becomes one `FactObservation`: an exact `Decimal` value with its unit, period,
-form, filing date and accession number. Rows are never merged. `select_fact` picks one
-observation for an exact period from 10-K/10-Q filings and their amendments, using an explicit
-`latest_filed` or `original` policy. `conflicting_values` is true only when eligible
-filings disagree (8-K and other forms stay visible in `candidates` but don't count). It
-returns `None` with a reason instead of choosing
-arbitrarily between disagreeing values, and it never mixes units. SEC's `fy`/`fp` describe the
-*filing* and are stored as `filing_fiscal_year`/`filing_fiscal_period`. Details:
-[docs/architecture.md](docs/architecture.md) §3.2d.
-
-## Evidence-backed analysis (offline)
-
-```bash
-uv run python -m financial_analyst.analysis            # Apple FY2026 revenue, JPMorgan Q3 2026 net income
-uv run python -m financial_analyst.analysis AAPL revenue FY2026Q3 FY2025Q3 --query "iPhone net sales"
-```
-
-```python
-from pathlib import Path
-
-from financial_analyst.analysis import explain_change, load_pinned_data, parse_period
-
-cache = Path("data/sec-cache")
-data = load_pinned_data(Path("evals/sec_snapshots_v1.json"), cache)
-fy2026, fy2025 = parse_period("FY2026"), parse_period("FY2025")
-result = explain_change("AAPL", "revenue", fy2026, fy2025, data=data, cache_dir=cache)
-print(result.status, result.summary)
-for passage in result.evidence:  # verified candidates, not proof of an explanation
-    print(passage.citation_id, passage.text[:200])
-```
-
-`explain_change` needs the pinned snapshots and the cached filings, and never contacts SEC.
-Every figure comes from `compare_periods`. Commentary is searched only in the filing that
-reports both values (its MD&A when the section label is reliable), and a passage is returned
-only if its citation verifies and it mentions the metric. A verified citation proves the text
-is exactly what the filing says, not that it explains the change, so passages are labeled
-candidates. The status is `complete`, `partial` (no usable commentary) or `abstained` (no
-reliable comparison), with reasons. Details: [docs/architecture.md](docs/architecture.md) §3.2l.
-
-## Tool-calling agent (scripted model, unvalidated drafts)
-
-```python
-from financial_analyst.agent import ModelTurn, ScriptedModel, ToolCall, run_agent
-
-# data and cache as in the analysis example above
-lookup = ToolCall(id="1", name="resolve_company", arguments={"identifier": "AAPL"})
-model = ScriptedModel(  # a stand-in for a live model adapter
-    [ModelTurn(tool_calls=[lookup]), ModelTurn(answer={"answer": "Apple resolved."})]
-)
-outcome = run_agent("Who is AAPL?", model, data=data, cache_dir=cache)
-print(outcome.status, outcome.draft_label, outcome.tool_results[0].output["cik"])
-```
-
-`run_agent` gives a model five tools over the pinned data (`resolve_company`, `get_fact`,
-`compare`, `commentary_filing`, `search_commentary`), validates every call, and returns tool
-errors to the model as data. A run is limited to 6 model turns, 6 tool calls, 90 seconds and
-one repair of a malformed draft. A draft refers to numbers only through tool `value_id`s and
-to passages through citation ids, and is always labeled `unvalidated_draft`: checking it and
-rendering a verified answer is M3.5 B2. No live model is connected. Details:
-[docs/architecture.md](docs/architecture.md) §3.2m.
-
-## Grounded answers and the agent evaluation
-
-```python
-from financial_analyst.grounding import ground
-
-answer = ground(outcome, data=data, cache_dir=cache)  # outcome from run_agent
-print(answer.status, answer.statement)
-for quote in answer.quotations:
-    print(quote.attribution, quote.text)
-```
-
-`ground` checks a draft only against what the run's own tools produced. Every value must
-come from this run's comparison for the same company, metric and periods, and the narrative
-is never published. Every citation must be a verified passage from that comparison's
-filing, and every quotation must be an exact substring of one. The published answer is
-rendered by the server: figures and provenance, verified quotations, and candidate
-commentary. The model's own wording and explanations are withheld, because causes can't be
-verified mechanically. Details: [docs/architecture.md](docs/architecture.md) §3.2n.
-
-```bash
-uv run python -m financial_analyst.agent_eval    # v1: 26 cases, frozen path-specific labels
-uv run python -m financial_analyst.agent_eval --dataset evals/agent_v2.json   # v2: 28 outcome-labeled cases
-```
-
-The evaluation tests the pipeline under fixed model behaviors (good, bad and adversarial).
-It does not measure how a real LLM reasons.
-
-## Live model (OpenAI-compatible provider)
-
-Set the provider in your environment (or in the git-ignored `.env`; see `.env.example`):
-
-```bash
-export LLM_API_KEY="..."          # never commit it
-export LLM_MODEL="your-model-id"
-# optional: LLM_BASE_URL (default https://api.openai.com/v1), LLM_REQUEST_TIMEOUT_SECONDS,
-# LLM_TEMPERATURE, LLM_INPUT_COST_PER_MTOK / LLM_OUTPUT_COST_PER_MTOK for cost estimates
-```
-
-```bash
-uv run python -m financial_analyst.live_agent ask "How much did Apple's revenue grow in fiscal 2026?"
-uv run python -m financial_analyst.live_agent eval                  # two smoke cases
-uv run python -m financial_analyst.live_agent eval --all --output live.json   # 19 cases
-# eval prints per-case diagnostics (tools, error codes, how the run ended) and exits 1 if any
-# case fails its checks
-```
-
-These commands send requests to the provider and may cost money. A question makes at most
-6 requests, and each one resends the conversation so far, including tool outputs. Only the
-server-rendered, grounded answer is printed, never the model's draft. An answer is
-published only if its comparison matches the company, metric and periods read from the
-question by fixed patterns (`request_scope.py`); otherwise it abstains. Segment and product
-metrics ("iPhone net sales") are not supported and abstain. A question that asks only for
-figures is complete without commentary; one that asks why, what drove a change, or what
-management said needs a verified citation (and a quotation, if one is asked for). The live
-report shows the structure (never the content) of any failed provider response, and counts
-requests without usage instead of treating their tokens as zero. Every provider request
-requires a function call; on a repair or the last allowed turn, only `submit_answer` is
-offered, and it is forced. Without a key or model
-the command names the missing setting and sends nothing. `uv run pytest` never contacts a
-provider: the adapter is tested against mocked responses. Details:
-[docs/architecture.md](docs/architecture.md) §3.2o.
+| Command | What it does |
+|---|---|
+| `uv run --extra ui streamlit run src/financial_analyst/app.py` | local web app (live provider) |
+| `uv run python -m financial_analyst.analysis` | deterministic comparison plus verified commentary, no model |
+| `uv run python -m financial_analyst.agent_eval --dataset evals/agent_v2.json` | scripted agent evaluation v2 (offline) |
+| `uv run python -m financial_analyst.agent_eval` | scripted agent evaluation v1, frozen (offline) |
+| `uv run python -m financial_analyst.live_agent ask "QUESTION"` | one live answer in the terminal |
+| `uv run python -m financial_analyst.live_agent eval --dataset evals/agent_v2.json --cases v2-apple-fy-revenue,v2-jpm-q3-net-income` | the final live verification |
+| `uv run python -m financial_analyst.evaluation evals/retrieval_v1.json` | retrieval evaluation (BM25, offline) |
+| `uv run uvicorn financial_analyst.main:create_app --factory` | health-check service (`/health`; needs `SEC_USER_AGENT`) |
+
+**Configuration** (environment or `.env`; see [`.env.example`](.env.example)):
+- **For SEC access and the health service only:** `SEC_USER_AGENT`, your name and a contact
+  email, which SEC's fair-access policy requires. The demo, the app and the evaluations read
+  the local cache and do not need it.
+- **For live answers:** `OPENAI_API_KEY` (or `LLM_API_KEY`) and `LLM_MODEL`.
+- **Optional:** `LLM_BASE_URL`, `LLM_REQUEST_TIMEOUT_SECONDS`, `LLM_TEMPERATURE`, and
+  `LLM_INPUT_COST_PER_MTOK` / `LLM_OUTPUT_COST_PER_MTOK` for cost estimates.
+
+Keys stay server-side and are never printed. A missing setting is reported by name only.
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/case-study.md](docs/case-study.md) | portfolio summary: accomplishments, live reliability story, limitations |
+| [docs/demo.md](docs/demo.md) | reproducible demonstration with real output |
+| [docs/architecture.md](docs/architecture.md) | final system (§2) and the record of every milestone |
+| [docs/decisions.md](docs/decisions.md) | architecture decision log (D-001 – D-043) |
+| [docs/developer-guide.md](docs/developer-guide.md) | using each component from Python and the command line |
