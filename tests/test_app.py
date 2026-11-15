@@ -104,6 +104,10 @@ def test_a_verified_comparison_is_shown_with_figures_chart_and_source():
     assert figures["prior"] == ("FY2025 (2024-09-29 to 2025-09-27)", "$416,161,000,000")
     assert (figures["change"], figures["percent"]) == ("+$62,673,000,000", "+15.1%")
     assert list(view["chart"].values()) == [416161000000.0, 478834000000.0]
+    assert list(view["chart"]) == ["FY2025", "FY2026"]
+    assert figures["compact"] == {"current": "$478.83B", "prior": "$416.16B",
+                                  "change": "+$62.67B"}  # fmt: skip
+    assert "$478,834,000,000" in figures["statement"]  # exact amounts stay in the statement
     assert view["source"]["url"].endswith("/000032019326000026/aapl-20260926.htm")
     assert view["source"]["filing"] == "10-K 0000320193-26-000026 filed 2026-11-03"
     assert not view["provider_failure"] and view["issues"] == []
@@ -167,3 +171,14 @@ def test_usage_text_reports_missing_usage_as_a_lower_bound():
 def test_importing_the_app_does_not_import_streamlit():
     assert "streamlit" not in sys.modules or "financial_analyst.app" in sys.modules
     assert callable(app.main) and callable(app.answer_view)
+
+
+def test_compact_amounts_round_for_display_and_fall_back_to_exact():
+    assert app.compact_amount(Decimal("416161000000"), "USD") == "$416.16B"
+    assert app.compact_amount(Decimal("-62673000000"), "USD", signed=True) == "-$62.67B"
+    assert app.compact_amount(Decimal("4002814000000"), "USD") == "$4.00T"
+    assert app.compact_amount(Decimal("14393000000"), "USD") == "$14.39B"
+    assert app.compact_amount(Decimal("5005000"), "USD") == "$5.01M"
+    assert app.compact_amount(Decimal("999"), "USD") == "$999"
+    assert app.compact_amount(Decimal("5000000000"), "shares") == "5,000,000,000 shares"
+    assert app.short_period("FY2026 (2025-09-28 to 2026-09-26)") == "FY2026"

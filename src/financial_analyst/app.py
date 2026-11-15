@@ -14,13 +14,14 @@ requests to the configured provider.
 """
 
 from collections.abc import Callable
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any
 
 from financial_analyst.agent import run_agent
 from financial_analyst.analysis import PinnedData, load_pinned_data
 from financial_analyst.config import Settings
-from financial_analyst.grounding import GroundedAnswer, ground
+from financial_analyst.grounding import GroundedAnswer, format_amount, ground
 from financial_analyst.llm_provider import (
     OpenAICompatibleModel,
     ProviderConfigError,
@@ -42,6 +43,23 @@ _STATUS_TEXT = {
     "abstained": "Abstained: no reliable answer could be established, so no figures are shown.",
 }
 _PROVIDER_FAILURES = ("model_error", "timeout")
+_SCALES = ((Decimal(10) ** 12, "T"), (Decimal(10) ** 9, "B"), (Decimal(10) ** 6, "M"))
+
+
+def compact_amount(value: Decimal, unit: str, signed: bool = False) -> str:
+    """Display-only rounding for the metric cards: "$416.16B", "+$62.67B". The exact amount
+    stays in the statement; non-USD units and small values are shown exactly."""
+    scale = next(((size, suffix) for size, suffix in _SCALES if abs(value) >= size), None)
+    if unit != "USD" or scale is None:
+        return format_amount(value, unit, signed=signed)
+    sign = "-" if value < 0 else ("+" if signed and value > 0 else "")
+    scaled = (abs(value) / scale[0]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return f"{sign}${scaled}{scale[1]}"
+
+
+def short_period(label: str) -> str:
+    """ "FY2026 (2025-09-28 to 2026-09-26)" -> "FY2026"; the full label is kept elsewhere."""
+    return label.split(" (", 1)[0]
 
 
 def analyze(
@@ -94,12 +112,18 @@ def answer_view(answer: GroundedAnswer) -> dict[str, Any]:
         "percent": answer.percent.display or answer.percent.note,
         "statement": answer.statement,
     }
+    provenance = answer.provenance
+    unit = provenance.unit
+    view["figures"]["compact"] = {
+        "current": compact_amount(answer.current.value, unit),
+        "prior": compact_amount(answer.prior.value, unit),
+        "change": compact_amount(answer.delta, unit, signed=True),
+    }
     # Chart values are the verified exact values, converted only for plotting.
     view["chart"] = {
-        f"Prior: {answer.prior.period}": float(answer.prior.value),
-        f"Current: {answer.current.period}": float(answer.current.value),
+        short_period(answer.prior.period): float(answer.prior.value),
+        short_period(answer.current.period): float(answer.current.value),
     }
-    provenance = answer.provenance
     view["source"] = {
         "filing": provenance.commentary_filing,
         "url": provenance.commentary_filing_url,
@@ -170,14 +194,22 @@ def main() -> None:  # pragma: no cover - exercised by running Streamlit
     if view["figures"]:
         figures = view["figures"]
         st.subheader(f"{figures['company']}: {figures['metric']}")
+        compact = figures["compact"]
         left, right, change = st.columns(3)
-        left.metric(figures["prior"][0], figures["prior"][1])
-        right.metric(figures["current"][0], figures["current"][1])
-        change.metric("Change", figures["change"], figures["percent"])
+        left.metric(short_period(figures["prior"][0]), compact["prior"],
+                    help=f"{figures['prior'][0]}: {figures['prior'][1]}", border=True)  # fmt: skip
+        right.metric(short_period(figures["current"][0]), compact["current"],
+                     help=f"{figures['current'][0]}: {figures['current'][1]}",
+                     border=True)  # fmt: skip
+        change.metric("Change", compact["change"], figures["percent"],
+                      help=f"Exact change: {figures['change']}", border=True)  # fmt: skip
         st.write(figures["statement"])
-        chart = pd.DataFrame({"Value (USD)": list(view["chart"].values())},
-                             index=list(view["chart"].keys()))  # fmt: skip
-        st.bar_chart(chart)
+        # Plotted in billions so the axis reads "400" rather than "400G"; display only.
+        billions = [value / 1e9 for value in view["chart"].values()]
+        chart = pd.DataFrame({"Fiscal period": list(view["chart"]), "USD billions": billions})
+        st.bar_chart(chart, x="Fiscal period", y="USD billions", x_label="Fiscal period",
+                     y_label=f"{figures['metric']} (USD billions)", sort=False,
+                     height=320)  # fmt: skip
         source = view["source"]
         link = f"[{source['filing']}]({source['url']})" if source["url"] else source["filing"]
         st.markdown(f"**Source:** {link}  \nConcept: `{source['concept']}`")

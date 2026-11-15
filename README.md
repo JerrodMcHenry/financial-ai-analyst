@@ -9,9 +9,7 @@ writes every figure, period and citation.
 
 ## Screenshot
 
-> **Screenshot placeholder.** Save a screenshot of the Streamlit app as
-> `docs/images/streamlit-demo.png`, then replace this note with:
-> `![Financial AI Analyst: a grounded answer in the Streamlit app](docs/images/streamlit-demo.png)`
+![Financial AI Analyst showing a verified Apple revenue comparison](docs/images/streamlit-demo.png)
 
 ## The problem
 
